@@ -1,0 +1,27 @@
+version: "3"
+
+tasks:
+  test:
+    desc: Run unit tests
+    cmds:
+      - go test ./...
+
+  test:race:
+    desc: Run tests with the race detector
+    cmds:
+      - go test -race ./...
+
+  test:integration:opencode:
+    desc: Run OpenCode ACP integration tests
+    cmds:
+      - go test -tags='integration,opencode' -count=1 ./acpagent
+
+  test:integration:codex:
+    desc: Run Codex ACP integration tests
+    cmds:
+      - go test -tags='integration,codex' -count=1 ./acpagent
+
+  lint:
+    desc: Run golangci-lint
+    cmds:
+      - go tool golangci-lint run ./...
