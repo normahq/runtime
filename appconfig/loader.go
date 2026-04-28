@@ -23,14 +23,21 @@ const (
 
 // RuntimeLoadOptions configures runtime config loading.
 type RuntimeLoadOptions struct {
+	// WorkingDir anchors relative config search paths.
 	WorkingDir string
-	ConfigDir  string
-	Profile    string
+	// ConfigDir overrides the primary config root before fallback locations.
+	ConfigDir string
+	// Profile selects profiles.<name>; empty uses the default profile.
+	Profile string
 }
 
 // AppLoadOptions configures app config loading on top of runtime config.
 type AppLoadOptions struct {
-	AppName      string
+	// AppName selects app-specific config file names and env variable prefixes.
+	AppName string
+	// EnvPrefix overrides the environment variable prefix. Empty uses AppName.
+	EnvPrefix string
+	// DefaultsYAML is merged before on-disk configuration when provided.
 	DefaultsYAML []byte
 	// UseDotConfigAppDir resolves config from app-specific .config layout:
 	//   - <config-dir>/<app>/config.yaml, then <config-dir>/config.yaml
@@ -87,7 +94,9 @@ func LoadResolvedSettings(runtimeOpts RuntimeLoadOptions, opts AppLoadOptions) (
 		return nil, "", err
 	}
 	if strings.TrimSpace(selectedPath) == "" {
-		return nil, "", fmt.Errorf("runtime config not found; looked for: %s", strings.Join(searchedPaths, ", "))
+		if len(opts.DefaultsYAML) == 0 {
+			return nil, "", fmt.Errorf("runtime config not found; looked for: %s", strings.Join(searchedPaths, ", "))
+		}
 	}
 
 	v, err := loadConfigViper(selectedPath, opts.DefaultsYAML)
@@ -105,7 +114,7 @@ func LoadResolvedSettings(runtimeOpts RuntimeLoadOptions, opts AppLoadOptions) (
 		return nil, "", err
 	}
 
-	applyAppEnvOverrides(v, appName)
+	applyAppEnvOverrides(v, appName, opts.EnvPrefix)
 
 	settings = v.AllSettings()
 	if settings == nil {
@@ -125,6 +134,9 @@ func loadConfigViper(configPath string, defaultsYAML []byte) (*viper.Viper, erro
 		}
 	}
 
+	if strings.TrimSpace(configPath) == "" {
+		return v, nil
+	}
 	content, err := os.ReadFile(configPath)
 	if err != nil {
 		return nil, fmt.Errorf("read config file %q: %w", configPath, err)
@@ -255,6 +267,7 @@ func DecodeSettings(settings map[string]any, out any) error {
 		WeaklyTypedInput: true,
 		DecodeHook: mapstructure.ComposeDecodeHookFunc(
 			mapstructure.StringToSliceHookFunc(","),
+			mapstructure.StringToTimeDurationHookFunc(),
 		),
 	})
 	if err != nil {
@@ -315,8 +328,11 @@ func dedupePaths(paths []string) []string {
 	return out
 }
 
-func applyAppEnvOverrides(v *viper.Viper, appName string) {
-	prefix := strings.ToUpper(strings.TrimSpace(appName))
+func applyAppEnvOverrides(v *viper.Viper, appName string, envPrefix string) {
+	prefix := strings.ToUpper(strings.TrimSpace(envPrefix))
+	if prefix == "" {
+		prefix = strings.ToUpper(strings.TrimSpace(appName))
+	}
 	if prefix == "" {
 		return
 	}
