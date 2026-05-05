@@ -119,22 +119,31 @@ const (
 	defaultAgentName        = "ACPAgent"
 	defaultAgentDescription = "ACP runtime exposed through ADK"
 
-	acpTypeText     = "text"
-	acpTypeImage    = "image"
-	acpTypeAudio    = "audio"
-	acpTypeResource = "resource"
-	acpUsageUpdate  = "usage_update"
+	acpTypeText       = "text"
+	acpTypeImage      = "image"
+	acpTypeAudio      = "audio"
+	acpTypeResource   = "resource"
+	acpUsageUpdate    = "usage_update"
+	acpPlanEntriesKey = "entries"
 )
 
-// SessionStateKey is the reserved ADK session-state key for ACP-specific
-// per-session settings.
-//
-// The value at this key must be an object with optional fields:
-//   - "meta" (object): forwarded to ACP session/new._meta
-//
-// Set it before the first invocation in a given ADK session; once that ADK
-// session is bound to an ACP session, later changes do not rebind.
-const SessionStateKey = "acp_session"
+const (
+	// SessionStateKey is the reserved ADK session-state key for ACP-specific
+	// per-session settings.
+	//
+	// The value at this key must be an object with optional fields:
+	//   - "meta" (object): forwarded to ACP session/new._meta
+	//
+	// Set it before the first invocation in a given ADK session; once that ADK
+	// session is bound to an ACP session, later changes do not rebind.
+	SessionStateKey = "acp_session"
+	// PlanStateKey is the ADK session-state key used for ACP plan snapshots.
+	//
+	// Each ACP session/update.plan notification is projected into
+	// event.Actions.StateDelta[PlanStateKey] as the authoritative full plan
+	// replacement snapshot.
+	PlanStateKey = "acp_plan"
+)
 
 var _ adkagent.Agent = (*Agent)(nil)
 
@@ -280,6 +289,7 @@ func (a *Agent) run(ctx adkagent.InvocationContext) iter.Seq2[*session.Event, er
 
 		var promptResult *PromptResult
 		var finalText strings.Builder
+		var latestPlanSnapshot map[string]any
 		for updates != nil || resultCh != nil {
 			select {
 			case <-ctx.Done():
@@ -296,6 +306,9 @@ func (a *Agent) run(ctx adkagent.InvocationContext) iter.Seq2[*session.Event, er
 				}
 				if ext.Update.AgentMessageChunk != nil {
 					finalText.WriteString(contentVisibleText(ev.Content))
+				}
+				if planSnapshot, ok := ev.Actions.StateDelta[PlanStateKey].(map[string]any); ok {
+					latestPlanSnapshot = planSnapshot
 				}
 				// We log but don't re-mark as partial here as mapACPUpdateToEvent
 				// already set the appropriate Partial flag.
@@ -330,6 +343,9 @@ func (a *Agent) run(ctx adkagent.InvocationContext) iter.Seq2[*session.Event, er
 		}
 		if finalText.Len() > 0 {
 			ev.Content = genai.NewContentFromText(finalText.String(), genai.RoleModel)
+		}
+		if latestPlanSnapshot != nil {
+			ev.Actions.StateDelta[PlanStateKey] = latestPlanSnapshot
 		}
 		ev.TurnComplete = true
 		a.logADKEvent(logger, ev, "yielding final turn complete event")
@@ -1086,7 +1102,7 @@ func mapACPToolCallUpdate(invocationID string, tool *acp.SessionToolCallUpdate) 
 	return ev, true
 }
 
-func mapACPPlanUpdate(logger zerolog.Logger, invocationID string, plan *acp.SessionUpdatePlan) (*session.Event, bool) {
+func mapACPPlanUpdate(_ zerolog.Logger, invocationID string, plan *acp.SessionUpdatePlan) (*session.Event, bool) {
 	if plan == nil || len(plan.Entries) == 0 {
 		return nil, false
 	}
@@ -1098,17 +1114,11 @@ func mapACPPlanUpdate(logger zerolog.Logger, invocationID string, plan *acp.Sess
 			"priority": entry.Priority,
 		})
 	}
-	part := &genai.Part{
-		FunctionResponse: &genai.FunctionResponse{
-			ID:   "acp_plan",
-			Name: "acp_plan_update",
-			Response: map[string]any{
-				"entries": entries,
-			},
-		},
-	}
 	ev := session.NewEvent(invocationID)
-	ev.Content = genai.NewContentFromParts([]*genai.Part{part}, genai.RoleModel)
+	ev.Actions.StateDelta[PlanStateKey] = map[string]any{
+		acpPlanEntriesKey: entries,
+	}
+	ev.Partial = true
 	return ev, true
 }
 

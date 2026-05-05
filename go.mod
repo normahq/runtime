@@ -3,7 +3,7 @@ module github.com/normahq/runtime
 go 1.25.5
 
 require (
-	github.com/coder/acp-go-sdk v0.12.0
+	github.com/coder/acp-go-sdk v0.12.2
 	github.com/go-playground/validator/v10 v10.30.2
 	github.com/go-viper/mapstructure/v2 v2.5.0
 	github.com/modelcontextprotocol/go-sdk v1.5.0
@@ -12,7 +12,7 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/xeipuuv/gojsonschema v1.2.0
 	google.golang.org/adk v1.2.0
-	google.golang.org/genai v1.54.0
+	google.golang.org/genai v1.56.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 

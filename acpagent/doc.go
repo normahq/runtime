@@ -36,4 +36,11 @@
 // non-object `state[SessionStateKey]`, non-object `state[SessionStateKey].meta`,
 // or a cwd that is not a valid existing directory) cause invocation failure
 // before ACP session creation.
+//
+// # ACP plan updates
+//
+// ACP `session/update.plan` notifications are projected into ADK event state
+// under [PlanStateKey]. Each event carries the full replacement snapshot at
+// `event.Actions.StateDelta[PlanStateKey]` with an `entries` field containing
+// the current ACP plan entries. Plan updates do not appear as content parts.
 package acpagent

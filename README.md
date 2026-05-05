@@ -2,12 +2,18 @@
 
 `runtime` is a standalone Go module containing reusable agent runtime packages extracted from `norma`.
 
-It provides:
-- ACP-backed agents via `acpagent`
-- runtime config validation via `agentconfig` and `appconfig`
-- ADK-compatible agent construction via `agentfactory`
-- MCP server resolution via `mcpregistry`
-- hosted and pooled agent helpers
+The repo stays as one Go module. The root import path `github.com/normahq/runtime` is documentation-only; functional APIs live in the subpackages.
+
+## Start Here
+
+- Use `agentfactory` when you want to build runtime agents from validated provider config.
+- Use `appconfig` when you need config-file loading, profile overlays, and runtime validation.
+- Use `agentconfig` when you already have decoded config and need schema validation or normalization.
+- Use `acpagent` when you need direct ACP subprocess control.
+- Use `hostedagent` when you want to wrap a local API-backed model as an ADK agent.
+- Use `poolagent` to provide ordered failover across providers.
+- Use `structuredagent` to enforce JSON-schema-constrained I/O.
+- Use `mcpregistry` and `sessionstate` as low-level support packages.
 
 ## Installation
 
@@ -24,6 +30,7 @@ go get github.com/normahq/runtime
 - `github.com/normahq/runtime/hostedagent`
 - `github.com/normahq/runtime/mcpregistry`
 - `github.com/normahq/runtime/poolagent`
+- `github.com/normahq/runtime`
 - `github.com/normahq/runtime/sessionstate`
 - `github.com/normahq/runtime/structuredagent`
 
@@ -114,6 +121,10 @@ func main() {
 }
 ```
 
+ACP `session/update.plan` notifications are exposed through ADK event state at
+`event.Actions.StateDelta[acpagent.PlanStateKey]`. Each update replaces the
+full plan snapshot and is not emitted as a content part.
+
 ## Integration Tests
 
 Optional ACP integration tests are available for real runtimes:
@@ -135,6 +146,26 @@ go mod tidy
 go test ./...
 go test -race ./...
 go tool golangci-lint run ./...
+task docs:check
+task docs:generate
 ```
+
+## Go Doc
+
+The source comments and example tests are the source of truth for package documentation.
+
+Generate local docs from source:
+
+```bash
+task docs:generate
+```
+
+Validate that every public package has package docs and renders with `go doc`:
+
+```bash
+task docs:check
+```
+
+Generated output is written to `.cache/godoc/` and is not committed.
 
 See `AGENTS.md` for repository-specific guidance.

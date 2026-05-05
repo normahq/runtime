@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -26,8 +27,9 @@ import (
 )
 
 const (
-	testACPCallID = "call-1"
-	testACPToolID = "tool-1"
+	testACPCallID     = "call-1"
+	testACPToolID     = "tool-1"
+	testACPPlanPrompt = "planning"
 
 	testSessionOneHello = "session-1:hello"
 )
@@ -1499,6 +1501,117 @@ func TestAgentRunMapsACPEventsToADKEvents(t *testing.T) {
 	}
 }
 
+func TestAgentRunMapsACPPlanUpdatesToStateDelta(t *testing.T) {
+	a, err := New(Config{
+		Context:    context.Background(),
+		Command:    helperCommand(t),
+		WorkingDir: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer func() { _ = a.Close() }()
+
+	sessionService := session.InMemoryService()
+	r, err := runnerpkg.New(runnerpkg.Config{
+		AppName:        "test-app",
+		Agent:          a,
+		SessionService: sessionService,
+	})
+	if err != nil {
+		t.Fatalf("runner.New() error = %v", err)
+	}
+	sess, err := sessionService.Create(context.Background(), &session.CreateRequest{
+		AppName: "test-app",
+		UserID:  "test-user",
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	var finalPlanSnapshot map[string]any
+	var streamedPlanSnapshots []map[string]any
+	seenMessage := false
+	seenTurnComplete := false
+
+	for ev, err := range r.Run(
+		context.Background(),
+		"test-user",
+		sess.Session.ID(),
+		genai.NewContentFromText(testACPPlanPrompt, genai.RoleUser),
+		agent.RunConfig{},
+	) {
+		if err != nil {
+			t.Fatalf("runner event error = %v", err)
+		}
+		if ev == nil {
+			continue
+		}
+		if planSnapshot, ok := planStateSnapshotFromEvent(t, ev); ok {
+			if !ev.TurnComplete && ev.Content != nil {
+				t.Fatalf("plan event content = %#v, want nil", ev.Content)
+			}
+			switch {
+			case ev.TurnComplete:
+				finalPlanSnapshot = planSnapshot
+			case !ev.Partial:
+				t.Fatal("plan event Partial = false, want true")
+			default:
+				streamedPlanSnapshots = append(streamedPlanSnapshots, planSnapshot)
+			}
+		}
+		if ev.Partial && extractPromptText(ev.Content) == "planning-done" {
+			seenMessage = true
+		}
+		if ev.TurnComplete {
+			seenTurnComplete = true
+		}
+	}
+
+	if len(streamedPlanSnapshots) != 2 {
+		t.Fatalf("streamed plan snapshot count = %d, want 2", len(streamedPlanSnapshots))
+	}
+	if got := planSnapshotEntries(t, streamedPlanSnapshots[0]); len(got) != 1 {
+		t.Fatalf("first plan entry count = %d, want 1", len(got))
+	}
+	secondEntries := planSnapshotEntries(t, streamedPlanSnapshots[1])
+	if len(secondEntries) != 2 {
+		t.Fatalf("second plan entry count = %d, want 2", len(secondEntries))
+	}
+	if got := secondEntries[0]["status"]; got != acp.PlanEntryStatusCompleted {
+		t.Fatalf("second plan first status = %v, want %q", got, acp.PlanEntryStatusCompleted)
+	}
+	if got := secondEntries[1]["content"]; got != "Run linters" {
+		t.Fatalf("second plan second content = %v, want %q", got, "Run linters")
+	}
+
+	stored, err := sessionService.Get(context.Background(), &session.GetRequest{
+		AppName:   "test-app",
+		UserID:    "test-user",
+		SessionID: sess.Session.ID(),
+	})
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	storedSnapshotValue, err := stored.Session.State().Get(PlanStateKey)
+	if err != nil {
+		t.Fatalf("State().Get(%q) error = %v", PlanStateKey, err)
+	}
+	if !reflect.DeepEqual(finalPlanSnapshot, streamedPlanSnapshots[1]) {
+		t.Fatalf("final plan snapshot = %#v, want %#v", finalPlanSnapshot, streamedPlanSnapshots[1])
+	}
+	storedSnapshot := planSnapshotFromValue(t, storedSnapshotValue)
+	if !reflect.DeepEqual(storedSnapshot, streamedPlanSnapshots[1]) {
+		t.Fatalf("stored plan snapshot = %#v, want %#v", storedSnapshot, streamedPlanSnapshots[1])
+	}
+	if !seenMessage {
+		t.Fatalf("expected mapped agent message chunk event")
+	}
+	if !seenTurnComplete {
+		t.Fatalf("expected final turn complete event")
+	}
+}
+
 func TestClientCreateSessionSetsMCPServers(t *testing.T) {
 	expectedServers := []acp.McpServer{
 		{
@@ -1920,6 +2033,30 @@ func runACPHelper(stdin *os.File, stdout *os.File) {
 				writeEnvelope(stdout, helperEnvelope{JSONRPC: "2.0", ID: msg.ID, Result: mustJSON(helperPromptResponse{StopReason: string(acp.StopReasonEndTurn)})})
 				continue
 			}
+			if prompt == testACPPlanPrompt {
+				writePlanUpdate(stdout, req.SessionID, []acp.PlanEntry{
+					{
+						Content:  "Run tests",
+						Status:   acp.PlanEntryStatusInProgress,
+						Priority: acp.PlanEntryPriorityMedium,
+					},
+				})
+				writePlanUpdate(stdout, req.SessionID, []acp.PlanEntry{
+					{
+						Content:  "Run tests",
+						Status:   acp.PlanEntryStatusCompleted,
+						Priority: acp.PlanEntryPriorityMedium,
+					},
+					{
+						Content:  "Run linters",
+						Status:   acp.PlanEntryStatusPending,
+						Priority: acp.PlanEntryPriorityHigh,
+					},
+				})
+				writeUpdate(stdout, req.SessionID, "planning-done")
+				writeEnvelope(stdout, helperEnvelope{JSONRPC: "2.0", ID: msg.ID, Result: mustJSON(helperPromptResponse{StopReason: string(acp.StopReasonEndTurn)})})
+				continue
+			}
 			prefix := req.SessionID + ":"
 			writeUpdate(stdout, req.SessionID, prefix)
 			writeUpdate(stdout, req.SessionID, prompt)
@@ -1961,6 +2098,13 @@ func writeToolCallUpdate(stdout *os.File, sessionID, toolCallID string, status a
 		"toolCallId":    toolCallID,
 		"status":        status,
 		"rawOutput":     rawOutput,
+	})
+}
+
+func writePlanUpdate(stdout *os.File, sessionID string, entries []acp.PlanEntry) {
+	writeSessionUpdate(stdout, sessionID, map[string]any{
+		"sessionUpdate":   "plan",
+		acpPlanEntriesKey: entries,
 	})
 }
 
@@ -2111,10 +2255,10 @@ func TestMapACPPlanUpdate(t *testing.T) {
 	logger := zerolog.Nop()
 
 	tests := []struct {
-		name      string
-		plan      *acp.SessionUpdatePlan
-		wantOK    bool
-		wantCount int
+		name        string
+		plan        *acp.SessionUpdatePlan
+		wantOK      bool
+		wantEntries []map[string]any
 	}{
 		{
 			name:   "nil plan",
@@ -2137,8 +2281,14 @@ func TestMapACPPlanUpdate(t *testing.T) {
 					},
 				},
 			},
-			wantOK:    true,
-			wantCount: 1,
+			wantOK: true,
+			wantEntries: []map[string]any{
+				{
+					"content":  "Run tests",
+					"status":   acp.PlanEntryStatusInProgress,
+					"priority": acp.PlanEntryPriorityMedium,
+				},
+			},
 		},
 		{
 			name: "multiple entries",
@@ -2148,8 +2298,19 @@ func TestMapACPPlanUpdate(t *testing.T) {
 					{Content: "Step 2", Status: acp.PlanEntryStatusPending},
 				},
 			},
-			wantOK:    true,
-			wantCount: 1,
+			wantOK: true,
+			wantEntries: []map[string]any{
+				{
+					"content":  "Step 1",
+					"status":   acp.PlanEntryStatusCompleted,
+					"priority": acp.PlanEntryPriority(""),
+				},
+				{
+					"content":  "Step 2",
+					"status":   acp.PlanEntryStatusPending,
+					"priority": acp.PlanEntryPriority(""),
+				},
+			},
 		},
 	}
 
@@ -2162,9 +2323,68 @@ func TestMapACPPlanUpdate(t *testing.T) {
 			if tt.wantOK && ev == nil {
 				t.Errorf("mapACPPlanUpdate() ev = nil, want event")
 			}
-			if tt.wantOK && ev.Content != nil && len(ev.Content.Parts) != tt.wantCount {
-				t.Errorf("mapACPPlanUpdate() parts = %d, want %d", len(ev.Content.Parts), tt.wantCount)
+			if !tt.wantOK {
+				return
+			}
+			if ev.Content != nil {
+				t.Fatalf("mapACPPlanUpdate() content = %#v, want nil", ev.Content)
+			}
+			if !ev.Partial {
+				t.Fatal("mapACPPlanUpdate() Partial = false, want true")
+			}
+			gotSnapshot, ok := planStateSnapshotFromEvent(t, ev)
+			if !ok {
+				t.Fatalf("mapACPPlanUpdate() missing plan state delta")
+			}
+			if gotEntries := planSnapshotEntries(t, gotSnapshot); !reflect.DeepEqual(gotEntries, tt.wantEntries) {
+				t.Fatalf("mapACPPlanUpdate() entries = %#v, want %#v", gotEntries, tt.wantEntries)
 			}
 		})
+	}
+}
+
+func planStateSnapshotFromEvent(t *testing.T, ev *session.Event) (map[string]any, bool) {
+	t.Helper()
+	if ev == nil || ev.Actions.StateDelta == nil {
+		return nil, false
+	}
+	rawSnapshot, ok := ev.Actions.StateDelta[PlanStateKey]
+	if !ok {
+		return nil, false
+	}
+	return planSnapshotFromValue(t, rawSnapshot), true
+}
+
+func planSnapshotFromValue(t *testing.T, rawSnapshot any) map[string]any {
+	t.Helper()
+	snapshot, ok := rawSnapshot.(map[string]any)
+	if !ok {
+		t.Fatalf("plan snapshot type = %T, want map[string]any", rawSnapshot)
+	}
+	return snapshot
+}
+
+func planSnapshotEntries(t *testing.T, snapshot map[string]any) []map[string]any {
+	t.Helper()
+	rawEntries, ok := snapshot[acpPlanEntriesKey]
+	if !ok {
+		t.Fatalf("plan snapshot missing %q", acpPlanEntriesKey)
+	}
+	switch entries := rawEntries.(type) {
+	case []map[string]any:
+		return entries
+	case []any:
+		normalized := make([]map[string]any, 0, len(entries))
+		for _, entry := range entries {
+			entryMap, ok := entry.(map[string]any)
+			if !ok {
+				t.Fatalf("plan entry type = %T, want map[string]any", entry)
+			}
+			normalized = append(normalized, entryMap)
+		}
+		return normalized
+	default:
+		t.Fatalf("plan entries type = %T, want []map[string]any", rawEntries)
+		return nil
 	}
 }
