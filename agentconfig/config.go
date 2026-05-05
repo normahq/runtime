@@ -23,31 +23,45 @@ const (
 
 // MCPServerConfig describes how to connect to an MCP server.
 type MCPServerConfig struct {
-	Type       MCPServerType     `json:"type"                  yaml:"type"                  mapstructure:"type"                validate:"required,oneof=stdio http sse,mcp_requirements"`
-	Cmd        []string          `json:"cmd,omitempty"         yaml:"cmd,omitempty"         mapstructure:"cmd"                 validate:"omitempty,dive,notblank"`
-	Args       []string          `json:"args,omitempty"        yaml:"args,omitempty"        mapstructure:"args"                validate:"omitempty,dive,notblank"`
-	Env        map[string]string `json:"env,omitempty"         yaml:"env,omitempty"         mapstructure:"env"`
-	WorkingDir string            `json:"working_dir,omitempty" yaml:"working_dir,omitempty" mapstructure:"working_dir"         validate:"omitempty,notblank"`
-	URL        string            `json:"url,omitempty"         yaml:"url,omitempty"         mapstructure:"url"`
-	Headers    map[string]string `json:"headers,omitempty"     yaml:"headers,omitempty"     mapstructure:"headers"`
+	// Type selects the MCP transport implementation.
+	Type MCPServerType `json:"type"                  yaml:"type"                  mapstructure:"type"                validate:"required,oneof=stdio http sse,mcp_requirements"`
+	// Cmd is the stdio server executable path or argv prefix.
+	Cmd []string `json:"cmd,omitempty"         yaml:"cmd,omitempty"         mapstructure:"cmd"                 validate:"omitempty,dive,notblank"`
+	// Args appends additional stdio server arguments after Cmd.
+	Args []string `json:"args,omitempty"        yaml:"args,omitempty"        mapstructure:"args"                validate:"omitempty,dive,notblank"`
+	// Env defines environment variables for stdio server execution.
+	Env map[string]string `json:"env,omitempty"         yaml:"env,omitempty"         mapstructure:"env"`
+	// WorkingDir sets the stdio server process working directory.
+	WorkingDir string `json:"working_dir,omitempty" yaml:"working_dir,omitempty" mapstructure:"working_dir"         validate:"omitempty,notblank"`
+	// URL is the base endpoint for HTTP and SSE MCP transports.
+	URL string `json:"url,omitempty"         yaml:"url,omitempty"         mapstructure:"url"`
+	// Headers provides additional request headers for HTTP and SSE transports.
+	Headers map[string]string `json:"headers,omitempty"     yaml:"headers,omitempty"     mapstructure:"headers"`
 }
 
 // ACPConfig is an ACP runtime configuration block used by generic and alias types.
 type ACPConfig struct {
-	Cmd       []string `json:"cmd,omitempty"        yaml:"cmd,omitempty"        mapstructure:"cmd"        validate:"omitempty,dive,notblank"`
+	// Cmd is the ACP executable argv prefix before any alias-specific defaults.
+	Cmd []string `json:"cmd,omitempty"        yaml:"cmd,omitempty"        mapstructure:"cmd"        validate:"omitempty,dive,notblank"`
+	// ExtraArgs appends CLI arguments after the resolved ACP command.
 	ExtraArgs []string `json:"extra_args,omitempty" yaml:"extra_args,omitempty" mapstructure:"extra_args" validate:"omitempty,dive,notblank"`
-	Model     string   `json:"model,omitempty"      yaml:"model,omitempty"      mapstructure:"model"      validate:"omitempty,notblank"`
-	Mode      string   `json:"mode,omitempty"       yaml:"mode,omitempty"       mapstructure:"mode"       validate:"omitempty,notblank"`
+	// Model selects the runtime model identifier when the backend supports it.
+	Model string `json:"model,omitempty"      yaml:"model,omitempty"      mapstructure:"model"      validate:"omitempty,notblank"`
+	// Mode selects the runtime session mode when the backend supports it.
+	Mode string `json:"mode,omitempty"       yaml:"mode,omitempty"       mapstructure:"mode"       validate:"omitempty,notblank"`
 }
 
 // LocalAPIConfig is a local API-backed runtime configuration block.
 type LocalAPIConfig struct {
+	// APIKey authenticates requests to the hosted provider API.
 	APIKey string `json:"api_key,omitempty" yaml:"api_key,omitempty" mapstructure:"api_key"`
-	Model  string `json:"model,omitempty"   yaml:"model,omitempty"   mapstructure:"model"   validate:"omitempty,notblank"`
+	// Model selects the hosted provider model identifier.
+	Model string `json:"model,omitempty"   yaml:"model,omitempty"   mapstructure:"model"   validate:"omitempty,notblank"`
 }
 
 // PoolConfig is the pool runtime configuration block.
 type PoolConfig struct {
+	// Members lists provider IDs in ordered failover order.
 	Members []string `json:"members,omitempty" yaml:"members,omitempty" mapstructure:"members" validate:"omitempty,dive,notblank"`
 }
 
@@ -59,31 +73,51 @@ type PoolConfig struct {
 //	<agent_type>:
 //	  ...type-specific config...
 type Config struct {
-	Type               string   `json:"type"                           yaml:"type"                           mapstructure:"type"                validate:"required,oneof=generic_acp gemini_acp codex_acp opencode_acp copilot_acp claude_code_acp openai aistudio pool,agent_blocks"`
-	MCPServers         []string `json:"mcp_servers,omitempty"          yaml:"mcp_servers,omitempty"          mapstructure:"mcp_servers"         validate:"omitempty,dive,notblank"`
-	SystemInstructions string   `json:"system_instructions,omitempty"  yaml:"system_instructions,omitempty"  mapstructure:"system_instructions" validate:"omitempty,notblank"`
+	// Type selects the runtime backend implementation.
+	Type string `json:"type"                           yaml:"type"                           mapstructure:"type"                validate:"required,oneof=generic_acp gemini_acp codex_acp opencode_acp copilot_acp claude_code_acp openai aistudio pool,agent_blocks"`
+	// MCPServers lists MCP server IDs resolved by higher-level registries.
+	MCPServers []string `json:"mcp_servers,omitempty"          yaml:"mcp_servers,omitempty"          mapstructure:"mcp_servers"         validate:"omitempty,dive,notblank"`
+	// SystemInstructions defines provider-level instructions applied by default.
+	SystemInstructions string `json:"system_instructions,omitempty"  yaml:"system_instructions,omitempty"  mapstructure:"system_instructions" validate:"omitempty,notblank"`
 
-	GenericACP    *ACPConfig      `json:"generic_acp,omitempty"     yaml:"generic_acp,omitempty"     mapstructure:"generic_acp"`
-	GeminiACP     *ACPConfig      `json:"gemini_acp,omitempty"      yaml:"gemini_acp,omitempty"      mapstructure:"gemini_acp"`
-	CodexACP      *ACPConfig      `json:"codex_acp,omitempty"       yaml:"codex_acp,omitempty"       mapstructure:"codex_acp"`
-	OpenCodeACP   *ACPConfig      `json:"opencode_acp,omitempty"    yaml:"opencode_acp,omitempty"    mapstructure:"opencode_acp"`
-	CopilotACP    *ACPConfig      `json:"copilot_acp,omitempty"     yaml:"copilot_acp,omitempty"     mapstructure:"copilot_acp"`
-	ClaudeCodeACP *ACPConfig      `json:"claude_code_acp,omitempty" yaml:"claude_code_acp,omitempty" mapstructure:"claude_code_acp"`
-	OpenAI        *LocalAPIConfig `json:"openai,omitempty"         yaml:"openai,omitempty"          mapstructure:"openai"`
-	AIStudio      *LocalAPIConfig `json:"aistudio,omitempty"       yaml:"aistudio,omitempty"        mapstructure:"aistudio"`
-	PoolConfig    *PoolConfig     `json:"pool,omitempty"           yaml:"pool,omitempty"            mapstructure:"pool"`
+	// GenericACP configures a custom ACP executable.
+	GenericACP *ACPConfig `json:"generic_acp,omitempty"     yaml:"generic_acp,omitempty"     mapstructure:"generic_acp"`
+	// GeminiACP configures the Gemini ACP alias.
+	GeminiACP *ACPConfig `json:"gemini_acp,omitempty"      yaml:"gemini_acp,omitempty"      mapstructure:"gemini_acp"`
+	// CodexACP configures the Codex ACP alias.
+	CodexACP *ACPConfig `json:"codex_acp,omitempty"       yaml:"codex_acp,omitempty"       mapstructure:"codex_acp"`
+	// OpenCodeACP configures the OpenCode ACP alias.
+	OpenCodeACP *ACPConfig `json:"opencode_acp,omitempty"    yaml:"opencode_acp,omitempty"    mapstructure:"opencode_acp"`
+	// CopilotACP configures the Copilot ACP alias.
+	CopilotACP *ACPConfig `json:"copilot_acp,omitempty"     yaml:"copilot_acp,omitempty"     mapstructure:"copilot_acp"`
+	// ClaudeCodeACP configures the Claude Code ACP alias.
+	ClaudeCodeACP *ACPConfig `json:"claude_code_acp,omitempty" yaml:"claude_code_acp,omitempty" mapstructure:"claude_code_acp"`
+	// OpenAI configures a local OpenAI-backed hosted agent.
+	OpenAI *LocalAPIConfig `json:"openai,omitempty"         yaml:"openai,omitempty"          mapstructure:"openai"`
+	// AIStudio configures a local Google AI Studio-backed hosted agent.
+	AIStudio *LocalAPIConfig `json:"aistudio,omitempty"       yaml:"aistudio,omitempty"        mapstructure:"aistudio"`
+	// PoolConfig configures an ordered failover pool.
+	PoolConfig *PoolConfig `json:"pool,omitempty"           yaml:"pool,omitempty"            mapstructure:"pool"`
 }
 
 // ResolvedConfig is a runtime-ready agent configuration produced from Config normalization.
 type ResolvedConfig struct {
-	Type               string
-	MCPServers         []string
+	// Type is the normalized runtime backend type.
+	Type string
+	// MCPServers are the resolved MCP server IDs referenced by the runtime.
+	MCPServers []string
+	// SystemInstructions are the normalized provider-level instructions.
 	SystemInstructions string
 
-	Command     []string
-	APIKey      string
-	Model       string
-	Mode        string
+	// Command is the runtime command argv for ACP-backed agents.
+	Command []string
+	// APIKey is the resolved hosted-provider credential.
+	APIKey string
+	// Model is the resolved runtime model identifier.
+	Model string
+	// Mode is the resolved runtime mode identifier.
+	Mode string
+	// PoolMembers are the resolved provider IDs in pool failover order.
 	PoolMembers []string
 }
 

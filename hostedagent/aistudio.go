@@ -10,6 +10,8 @@ import (
 	"google.golang.org/genai"
 )
 
+// NewAIStudioModel creates an ADK-compatible Gemini model backed by Google AI
+// Studio.
 func NewAIStudioModel(ctx context.Context, apiKey, modelName string) (model.LLM, error) {
 	if strings.TrimSpace(modelName) == "" {
 		return nil, fmt.Errorf("model is required for aistudio provider")

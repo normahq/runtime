@@ -14,11 +14,18 @@ const (
 
 // MCPServerConfig describes how to connect to an MCP server.
 type MCPServerConfig struct {
-	Type       MCPServerType
-	Cmd        []string
-	Args       []string
-	Env        map[string]string
+	// Type selects the MCP transport implementation.
+	Type MCPServerType
+	// Cmd is the stdio server executable path or argv prefix.
+	Cmd []string
+	// Args appends additional stdio server arguments after Cmd.
+	Args []string
+	// Env defines environment variables for stdio server execution.
+	Env map[string]string
+	// WorkingDir sets the stdio server process working directory.
 	WorkingDir string
-	URL        string
-	Headers    map[string]string
+	// URL is the base endpoint for HTTP and SSE MCP transports.
+	URL string
+	// Headers provides additional request headers for HTTP and SSE transports.
+	Headers map[string]string
 }

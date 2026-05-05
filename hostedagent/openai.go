@@ -20,6 +20,8 @@ const (
 	openAITimeout        = 30 * time.Second
 )
 
+// OpenAIModel adapts the OpenAI chat completions API to the ADK model
+// interface.
 type OpenAIModel struct {
 	name   string
 	apiKey string
@@ -46,6 +48,7 @@ type openAIChatResponse struct {
 	} `json:"choices"`
 }
 
+// NewOpenAIModel creates an ADK-compatible model backed by the OpenAI API.
 func NewOpenAIModel(apiKey, modelName string) (*OpenAIModel, error) {
 	if strings.TrimSpace(apiKey) == "" {
 		return nil, fmt.Errorf("api_key is required for openai provider")
@@ -62,10 +65,12 @@ func NewOpenAIModel(apiKey, modelName string) (*OpenAIModel, error) {
 	}, nil
 }
 
+// Name returns the configured OpenAI model identifier.
 func (m *OpenAIModel) Name() string {
 	return m.name
 }
 
+// GenerateContent sends a single non-streaming request to the OpenAI API.
 func (m *OpenAIModel) GenerateContent(ctx context.Context, req *model.LLMRequest, _ bool) iter.Seq2[*model.LLMResponse, error] {
 	return func(yield func(*model.LLMResponse, error) bool) {
 		resp, err := m.generate(ctx, req)

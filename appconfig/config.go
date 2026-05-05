@@ -19,7 +19,9 @@ import (
 //	  providers: ...
 //	  mcp_servers: ...
 type RuntimeConfig struct {
-	Providers  map[string]agentconfig.Config          `json:"providers,omitempty"   mapstructure:"providers"   validate:"required,gt=0"`
+	// Providers contains named runtime provider definitions.
+	Providers map[string]agentconfig.Config `json:"providers,omitempty"   mapstructure:"providers"   validate:"required,gt=0"`
+	// MCPServers contains named MCP server definitions shared by providers.
 	MCPServers map[string]agentconfig.MCPServerConfig `json:"mcp_servers,omitempty" mapstructure:"mcp_servers" validate:"omitempty"`
 }
 

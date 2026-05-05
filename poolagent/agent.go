@@ -13,22 +13,32 @@ import (
 	"iter"
 )
 
+// MemberConfig identifies one provider that can satisfy a pool request.
 type MemberConfig struct {
+	// Name is the provider ID used when creating the member agent.
 	Name string
-	Cfg  agentconfig.Config
+	// Cfg is the validated provider configuration for the member.
+	Cfg agentconfig.Config
 }
 
+// AgentCreator constructs one pool member agent on demand.
 type AgentCreator interface {
 	CreateAgent(ctx context.Context, name string, req AgentRequest) (agent.Agent, error)
 }
 
+// AgentRequest contains the normalized request passed to each pool member.
 type AgentRequest struct {
-	Name               string
-	Description        string
+	// Name is the per-member runtime agent name.
+	Name string
+	// Description is the per-member runtime agent description.
+	Description string
+	// SystemInstructions are forwarded to the selected member agent.
 	SystemInstructions string
-	WorkingDirectory   string
+	// WorkingDirectory is the session working directory for the selected member.
+	WorkingDirectory string
 }
 
+// PoolExecutor lazily selects and caches the first healthy pool member.
 type PoolExecutor struct {
 	poolName     string
 	members      []MemberConfig
@@ -38,6 +48,7 @@ type PoolExecutor struct {
 	cachedAgent  agent.Agent
 }
 
+// NewPoolExecutor creates a pool executor for ordered failover across members.
 func NewPoolExecutor(poolName string, members []MemberConfig, agentCreator AgentCreator, req AgentRequest) *PoolExecutor {
 	return &PoolExecutor{
 		poolName:     poolName,
@@ -47,6 +58,8 @@ func NewPoolExecutor(poolName string, members []MemberConfig, agentCreator Agent
 	}
 }
 
+// Agent returns the cached healthy agent or creates the first successful pool
+// member in configured order.
 func (p *PoolExecutor) Agent(ctx context.Context) (agent.Agent, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -94,6 +107,7 @@ func (p *PoolExecutor) memberNames() string {
 	return strings.Join(names, ", ")
 }
 
+// Close closes the cached member agent when it exposes Close.
 func (p *PoolExecutor) Close() error {
 	if p.cachedAgent != nil {
 		if closer, ok := p.cachedAgent.(interface{ Close() error }); ok {
@@ -103,19 +117,29 @@ func (p *PoolExecutor) Close() error {
 	return nil
 }
 
+// AttemptError describes one failed member creation attempt.
 type AttemptError struct {
+	// Member is the member provider ID.
 	Member string
-	Index  int
-	Err    string
+	// Index is the zero-based member position in the configured failover order.
+	Index int
+	// Err is the member-specific failure text.
+	Err string
 }
 
+// AllPoolMembersFailedError reports that every member failed to initialize.
 type AllPoolMembersFailedError struct {
-	PoolName    string
+	// PoolName is the logical pool identifier.
+	PoolName string
+	// MemberNames is a comma-separated list of configured member IDs.
 	MemberNames string
-	Errors      []AttemptError
-	Err         error
+	// Errors contains the individual member failures in evaluation order.
+	Errors []AttemptError
+	// Err is the underlying summary error for errors.Is and errors.Unwrap.
+	Err error
 }
 
+// Error formats the full failover failure report.
 func (e *AllPoolMembersFailedError) Error() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "pool %q: all %d members failed\n", e.PoolName, len(e.Errors))
@@ -125,15 +149,18 @@ func (e *AllPoolMembersFailedError) Error() string {
 	return b.String()
 }
 
+// Unwrap returns the summary error for the failover failure.
 func (e *AllPoolMembersFailedError) Unwrap() error {
 	return e.Err
 }
 
+// PoolAgent exposes pool failover through the ADK agent interface.
 type PoolAgent struct {
 	agent.Agent
 	executor *PoolExecutor
 }
 
+// NewPoolAgent creates an ADK agent that runs through a failover pool.
 func NewPoolAgent(ctx context.Context, poolName string, members []MemberConfig, req AgentRequest, agentCreator AgentCreator) (*PoolAgent, error) {
 	executor := NewPoolExecutor(poolName, members, agentCreator, req)
 
@@ -197,6 +224,7 @@ func (p *PoolAgent) run(ctx agent.InvocationContext) iter.Seq2[*session.Event, e
 	}
 }
 
+// Close closes the currently cached pool member.
 func (p *PoolAgent) Close() error {
 	return p.executor.Close()
 }

@@ -11,12 +11,18 @@ import (
 	"google.golang.org/genai"
 )
 
+// Config describes an ADK agent backed by a hosted model implementation.
 type Config struct {
-	Name              string
-	Description       string
-	Instruction       string
+	// Name is the ADK agent display name.
+	Name string
+	// Description is the ADK agent description.
+	Description string
+	// Instruction is appended after GlobalInstruction for each model request.
+	Instruction string
+	// GlobalInstruction is prepended before Instruction for each model request.
 	GlobalInstruction string
-	Model             model.LLM
+	// Model handles underlying content generation.
+	Model model.LLM
 }
 
 type runtimeAgent struct {
@@ -27,6 +33,7 @@ type runtimeAgent struct {
 	globalInstruction string
 }
 
+// New wraps a hosted model as an ADK agent.
 func New(cfg Config) (adkagent.Agent, error) {
 	if cfg.Model == nil {
 		return nil, fmt.Errorf("model is required")

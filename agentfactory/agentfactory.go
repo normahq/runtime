@@ -1,4 +1,3 @@
-// Package agentfactory provides a registry and factory for creating ADK-compatible agents.
 package agentfactory
 
 import (
@@ -25,14 +24,22 @@ import (
 
 // BuildRequest defines the parameters for building a new agent instance.
 type BuildRequest struct {
-	AgentID           string   `json:"agent_id" validate:"required,min=1"`
-	Name              string   `json:"name,omitempty"`
-	Description       string   `json:"description,omitempty"`
-	Instruction       string   `json:"instruction,omitempty"`
-	GlobalInstruction string   `json:"global_instruction,omitempty"`
-	WorkingDirectory  string   `json:"working_directory" validate:"required,min=1"`
-	MCPServerIDs      []string `json:"mcp_server_ids,omitempty"`
-	SessionID         string   `json:"session_id,omitempty"`
+	// AgentID selects a provider entry from the factory registry.
+	AgentID string `json:"agent_id" validate:"required,min=1"`
+	// Name overrides the runtime agent display name.
+	Name string `json:"name,omitempty"`
+	// Description overrides the runtime agent description.
+	Description string `json:"description,omitempty"`
+	// Instruction overrides the provider-specific invocation instruction.
+	Instruction string `json:"instruction,omitempty"`
+	// GlobalInstruction is prepended ahead of Instruction for each invocation.
+	GlobalInstruction string `json:"global_instruction,omitempty"`
+	// WorkingDirectory is the session working directory for the built agent.
+	WorkingDirectory string `json:"working_directory" validate:"required,min=1"`
+	// MCPServerIDs overrides provider-level MCP server references for this build.
+	MCPServerIDs []string `json:"mcp_server_ids,omitempty"`
+	// SessionID requests a specific remote session identifier when supported.
+	SessionID string `json:"session_id,omitempty"`
 }
 
 var buildRequestValidator = newBuildRequestValidator()

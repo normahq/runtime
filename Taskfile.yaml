@@ -25,3 +25,13 @@ tasks:
     desc: Run golangci-lint
     cmds:
       - go tool golangci-lint run ./...
+
+  docs:generate:
+    desc: Generate local go doc output into .cache/godoc
+    cmds:
+      - sh ./scripts/docs-generate.sh
+
+  docs:check:
+    desc: Verify package docs exist and render for every local package
+    cmds:
+      - sh ./scripts/docs-check.sh
