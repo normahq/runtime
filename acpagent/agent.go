@@ -37,6 +37,12 @@ type Config struct {
 	Name string
 	// Description describes the agent's purpose.
 	Description string
+	// BeforeAgentCallbacks are standard ADK lifecycle callbacks invoked before
+	// the ACP-backed run starts.
+	BeforeAgentCallbacks []adkagent.BeforeAgentCallback
+	// AfterAgentCallbacks are standard ADK lifecycle callbacks invoked after
+	// the ACP-backed run completes.
+	AfterAgentCallbacks []adkagent.AfterAgentCallback
 	// Model is the specific LLM model identifier to use.
 	Model string
 	// Mode is the ACP session mode identifier to use.
@@ -223,9 +229,11 @@ func New(cfg Config) (*Agent, error) {
 		mcpServers:                mcpServers,
 	}
 	base, err := adkagent.New(adkagent.Config{
-		Name:        cfg.Name,
-		Description: cfg.Description,
-		Run:         a.run,
+		Name:                 cfg.Name,
+		Description:          cfg.Description,
+		BeforeAgentCallbacks: cfg.BeforeAgentCallbacks,
+		Run:                  a.run,
+		AfterAgentCallbacks:  cfg.AfterAgentCallbacks,
 	})
 	if err != nil {
 		if closeErr := client.Close(); closeErr != nil {

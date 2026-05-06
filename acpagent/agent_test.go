@@ -706,6 +706,93 @@ func TestAgentReusesRemoteSession(t *testing.T) {
 	}
 }
 
+func TestAgentBeforeAgentCallbacksShortCircuitACPPrompt(t *testing.T) {
+	a, err := New(Config{
+		Context: context.Background(),
+		Command: helperCommandWithEnv(t, map[string]string{
+			"GO_FAIL_FIRST_PROMPT_ENTITY_NOT_FOUND": "1",
+		}),
+		WorkingDir: t.TempDir(),
+		BeforeAgentCallbacks: []agent.BeforeAgentCallback{
+			func(agent.CallbackContext) (*genai.Content, error) {
+				return genai.NewContentFromText("before-callback", genai.RoleModel), nil
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer func() { _ = a.Close() }()
+
+	sessionService := session.InMemoryService()
+	r, err := runnerpkg.New(runnerpkg.Config{
+		AppName:        "test-app",
+		Agent:          a,
+		SessionService: sessionService,
+	})
+	if err != nil {
+		t.Fatalf("runner.New() error = %v", err)
+	}
+	sess, err := sessionService.Create(context.Background(), &session.CreateRequest{AppName: "test-app", UserID: "test-user"})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	got := collectEventTexts(t, r.Run(
+		context.Background(),
+		"test-user",
+		sess.Session.ID(),
+		genai.NewContentFromText("hello", genai.RoleUser),
+		agent.RunConfig{},
+	))
+	if !reflect.DeepEqual(got, []string{"before-callback"}) {
+		t.Fatalf("event texts = %#v, want %#v", got, []string{"before-callback"})
+	}
+}
+
+func TestAgentAfterAgentCallbacksEmitPostRunEvent(t *testing.T) {
+	a, err := New(Config{
+		Context:    context.Background(),
+		Command:    helperCommand(t),
+		WorkingDir: t.TempDir(),
+		AfterAgentCallbacks: []agent.AfterAgentCallback{
+			func(agent.CallbackContext) (*genai.Content, error) {
+				return genai.NewContentFromText("after-callback", genai.RoleModel), nil
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer func() { _ = a.Close() }()
+
+	sessionService := session.InMemoryService()
+	r, err := runnerpkg.New(runnerpkg.Config{
+		AppName:        "test-app",
+		Agent:          a,
+		SessionService: sessionService,
+	})
+	if err != nil {
+		t.Fatalf("runner.New() error = %v", err)
+	}
+	sess, err := sessionService.Create(context.Background(), &session.CreateRequest{AppName: "test-app", UserID: "test-user"})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	got := collectEventTexts(t, r.Run(
+		context.Background(),
+		"test-user",
+		sess.Session.ID(),
+		genai.NewContentFromText("hello", genai.RoleUser),
+		agent.RunConfig{},
+	))
+	want := []string{"session-1:", "hello", testSessionOneHello, "after-callback"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("event texts = %#v, want %#v", got, want)
+	}
+}
+
 func TestAgentUsesWorkingDirAsDefaultSessionCWD(t *testing.T) {
 	workingDir := t.TempDir()
 	a, err := New(Config{
@@ -1245,6 +1332,23 @@ func collectFinalText(t *testing.T, events iter.Seq2[*session.Event, error]) str
 		return finalText
 	}
 	return fullText.String()
+}
+
+func collectEventTexts(t *testing.T, events iter.Seq2[*session.Event, error]) []string {
+	t.Helper()
+	var texts []string
+	for ev, err := range events {
+		if err != nil {
+			t.Fatalf("runner event error = %v", err)
+		}
+		if ev == nil {
+			continue
+		}
+		if text := extractPromptText(ev.Content); text != "" {
+			texts = append(texts, text)
+		}
+	}
+	return texts
 }
 
 func TestAgentRunDoesNotDuplicatePartialInFinalEvent(t *testing.T) {
