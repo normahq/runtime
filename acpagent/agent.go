@@ -113,6 +113,8 @@ type acpSessionBinding struct {
 	remoteSessionID string
 	cwd             string
 	metaJSON        string
+	instructionInit instructionInitState
+	initWait        chan struct{}
 }
 
 type acpSessionConfig struct {
@@ -120,6 +122,14 @@ type acpSessionConfig struct {
 	meta     map[string]any
 	metaJSON string
 }
+
+type instructionInitState uint8
+
+const (
+	instructionInitPending instructionInitState = iota
+	instructionInitInProgress
+	instructionInitDone
+)
 
 const (
 	defaultAgentName        = "ACPAgent"
@@ -264,27 +274,24 @@ func (a *Agent) run(ctx adkagent.InvocationContext) iter.Seq2[*session.Event, er
 		}
 
 		prompt := extractPromptText(ctx.UserContent())
-		if instructions != "" {
-			if prompt == "" {
-				prompt = instructions
-			} else {
-				prompt = instructions + "\n\n" + prompt
-			}
-		}
-
 		if strings.TrimSpace(prompt) == "" {
 			yield(nil, errors.New("prompt is empty"))
 			return
 		}
 
-		remoteSessionID, err := a.ensureRemoteSession(ctx, logger, ctx.Session().ID())
+		adkSessionID := ctx.Session().ID()
+		remoteSessionID, err := a.ensureRemoteSession(ctx, logger, adkSessionID)
 		if err != nil {
+			yield(nil, err)
+			return
+		}
+		if err := a.ensureInstructionInitialized(ctx, logger, adkSessionID, remoteSessionID, instructions); err != nil {
 			yield(nil, err)
 			return
 		}
 
 		logger.Debug().
-			Str("adk_session_id", ctx.Session().ID()).
+			Str("adk_session_id", adkSessionID).
 			Str("acp_session_id", remoteSessionID).
 			Int("prompt_len", len(prompt)).
 			Msg("starting adk invocation")
@@ -340,7 +347,7 @@ func (a *Agent) run(ctx adkagent.InvocationContext) iter.Seq2[*session.Event, er
 		}
 
 		logger.Debug().
-			Str("adk_session_id", ctx.Session().ID()).
+			Str("adk_session_id", adkSessionID).
 			Str("acp_session_id", remoteSessionID).
 			Msg("completed adk invocation")
 
@@ -361,6 +368,136 @@ func (a *Agent) run(ctx adkagent.InvocationContext) iter.Seq2[*session.Event, er
 			return
 		}
 	}
+}
+
+func (a *Agent) ensureInstructionInitialized(
+	ctx adkagent.InvocationContext,
+	logger zerolog.Logger,
+	adkSessionID string,
+	remoteSessionID string,
+	instructions string,
+) error {
+	instructions = strings.TrimSpace(instructions)
+	if instructions == "" {
+		return nil
+	}
+
+	for {
+		a.sessionMu.Lock()
+		binding, ok := a.bindingByADK[adkSessionID]
+		if !ok || binding.remoteSessionID == "" {
+			a.sessionMu.Unlock()
+			return fmt.Errorf("acp session binding is missing for adk session %q", adkSessionID)
+		}
+		if binding.remoteSessionID != remoteSessionID {
+			a.sessionMu.Unlock()
+			return fmt.Errorf(
+				"acp session binding mismatch for adk session %q: got %q want %q",
+				adkSessionID,
+				binding.remoteSessionID,
+				remoteSessionID,
+			)
+		}
+
+		switch binding.instructionInit {
+		case instructionInitDone:
+			a.sessionMu.Unlock()
+			return nil
+		case instructionInitInProgress:
+			waitCh := binding.initWait
+			a.sessionMu.Unlock()
+			if waitCh == nil {
+				continue
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-waitCh:
+				continue
+			}
+		case instructionInitPending:
+			waitCh := make(chan struct{})
+			binding.instructionInit = instructionInitInProgress
+			binding.initWait = waitCh
+			a.bindingByADK[adkSessionID] = binding
+			a.sessionMu.Unlock()
+
+			initErr := a.runInstructionBootstrap(ctx, logger, adkSessionID, remoteSessionID, instructions)
+
+			a.sessionMu.Lock()
+			updated, ok := a.bindingByADK[adkSessionID]
+			if ok && updated.remoteSessionID == remoteSessionID {
+				doneCh := updated.initWait
+				updated.initWait = nil
+				if initErr == nil {
+					updated.instructionInit = instructionInitDone
+				} else {
+					updated.instructionInit = instructionInitPending
+				}
+				a.bindingByADK[adkSessionID] = updated
+				a.sessionMu.Unlock()
+				if doneCh != nil {
+					close(doneCh)
+				}
+			} else {
+				a.sessionMu.Unlock()
+				close(waitCh)
+			}
+
+			if initErr != nil {
+				return initErr
+			}
+			return nil
+		}
+	}
+}
+
+func (a *Agent) runInstructionBootstrap(
+	ctx adkagent.InvocationContext,
+	logger zerolog.Logger,
+	adkSessionID string,
+	remoteSessionID string,
+	instructions string,
+) error {
+	logger.Debug().
+		Str("adk_session_id", adkSessionID).
+		Str("acp_session_id", remoteSessionID).
+		Int("instruction_len", len(instructions)).
+		Msg("initializing acp session instructions")
+
+	updates, resultCh, err := a.client.Prompt(ctx, remoteSessionID, instructions)
+	if err != nil {
+		return fmt.Errorf("initialize acp session instructions: %w", err)
+	}
+
+	var promptResult *PromptResult
+	for updates != nil || resultCh != nil {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case _, ok := <-updates:
+			if !ok {
+				updates = nil
+			}
+		case result, ok := <-resultCh:
+			if !ok {
+				resultCh = nil
+				continue
+			}
+			promptResult = &result
+			resultCh = nil
+		}
+	}
+
+	if promptResult != nil && promptResult.Err != nil {
+		return fmt.Errorf("initialize acp session instructions: %w", promptResult.Err)
+	}
+
+	logger.Debug().
+		Str("adk_session_id", adkSessionID).
+		Str("acp_session_id", remoteSessionID).
+		Msg("acp session instructions initialized")
+	return nil
 }
 
 func (a *Agent) invocationLogger(ctx context.Context) zerolog.Logger {
@@ -486,6 +623,7 @@ func (a *Agent) ensureRemoteSession(ctx adkagent.InvocationContext, logger zerol
 		remoteSessionID: sessionID,
 		cwd:             cfg.cwd,
 		metaJSON:        cfg.metaJSON,
+		instructionInit: instructionInitPending,
 	}
 	event := logger.Debug().
 		Str("adk_session_id", adkSessionID).

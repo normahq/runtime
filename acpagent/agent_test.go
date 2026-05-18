@@ -32,6 +32,9 @@ const (
 	testACPPlanPrompt = "planning"
 
 	testSessionOneHello = "session-1:hello"
+	testSessionOneOne   = "session-1:one"
+	testSessionOneTwo   = "session-1:two"
+	testSessionTwoTwo   = "session-2:two"
 )
 
 func TestClientPromptReceivesUpdates(t *testing.T) {
@@ -400,8 +403,8 @@ func TestClientInitializeUsesConfiguredIdentity(t *testing.T) {
 
 func TestClientPromptAllowsConcurrentDifferentSessions(t *testing.T) {
 	const (
-		wantSession1 = "session-1:one"
-		wantSession2 = "session-2:two"
+		wantSession1 = testSessionOneOne
+		wantSession2 = testSessionTwoTwo
 	)
 
 	client, err := NewClient(context.Background(), ClientConfig{
@@ -444,7 +447,7 @@ func TestClientPromptAllowsConcurrentDifferentSessions(t *testing.T) {
 }
 
 func TestClientPromptRejectsConcurrentSameSession(t *testing.T) {
-	const wantSession1 = "session-1:one"
+	const wantSession1 = testSessionOneOne
 
 	client, err := NewClient(context.Background(), ClientConfig{
 		Command: helperCommand(t),
@@ -698,10 +701,10 @@ func TestAgentReusesRemoteSession(t *testing.T) {
 	first := collectFinalText(t, r.Run(context.Background(), "test-user", sess.Session.ID(), genai.NewContentFromText("one", genai.RoleUser), agent.RunConfig{}))
 	second := collectFinalText(t, r.Run(context.Background(), "test-user", sess.Session.ID(), genai.NewContentFromText("two", genai.RoleUser), agent.RunConfig{}))
 
-	if first != "session-1:one" {
+	if first != testSessionOneOne {
 		t.Fatalf("first final text = %q, want session-1:one", first)
 	}
-	if second != "session-1:two" {
+	if second != testSessionOneTwo {
 		t.Fatalf("second final text = %q, want session-1:two", second)
 	}
 }
@@ -903,7 +906,7 @@ func TestAgentInjectsSessionStateIntoInstruction(t *testing.T) {
 	}
 
 	got := collectFinalText(t, r.Run(context.Background(), "test-user", sess.Session.ID(), genai.NewContentFromText("hello", genai.RoleUser), agent.RunConfig{}))
-	want := "session-1:project=relay cwd=" + workingDir + "\n\nhello"
+	want := "session-1:hello"
 	if got != want {
 		t.Fatalf("final text = %q, want %q", got, want)
 	}
@@ -946,9 +949,118 @@ func TestAgentInstructionProviderSkipsTemplateInjection(t *testing.T) {
 	}
 
 	got := collectFinalText(t, r.Run(context.Background(), "test-user", sess.Session.ID(), genai.NewContentFromText("hello", genai.RoleUser), agent.RunConfig{}))
-	want := "session-1:provider {project}\n\nhello"
+	want := "session-1:hello"
 	if got != want {
 		t.Fatalf("final text = %q, want %q", got, want)
+	}
+}
+
+func TestAgentBootstrapsInstructionsOnlyOncePerADKSession(t *testing.T) {
+	workingDir := t.TempDir()
+	expectedPromptsJSON := `["project=relay cwd=` + workingDir + `","one","two"]`
+
+	a, err := New(Config{
+		Context: context.Background(),
+		Command: helperCommandWithEnv(t, map[string]string{
+			"GO_EXPECT_SESSION_CWD": workingDir,
+			"GO_EXPECT_PROMPTS":     expectedPromptsJSON,
+		}),
+		WorkingDir:  workingDir,
+		Instruction: "project={project} cwd={cwd}",
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer func() { _ = a.Close() }()
+
+	sessionService := session.InMemoryService()
+	r, err := runnerpkg.New(runnerpkg.Config{
+		AppName:        "test-app",
+		Agent:          a,
+		SessionService: sessionService,
+	})
+	if err != nil {
+		t.Fatalf("runner.New() error = %v", err)
+	}
+	sess, err := sessionService.Create(context.Background(), &session.CreateRequest{
+		AppName: "test-app",
+		UserID:  "test-user",
+		State: map[string]any{
+			"cwd":     workingDir,
+			"project": "relay",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	first := collectFinalText(t, r.Run(context.Background(), "test-user", sess.Session.ID(), genai.NewContentFromText("one", genai.RoleUser), agent.RunConfig{}))
+	if first != testSessionOneOne {
+		t.Fatalf("first final text = %q, want session-1:one", first)
+	}
+	second := collectFinalText(t, r.Run(context.Background(), "test-user", sess.Session.ID(), genai.NewContentFromText("two", genai.RoleUser), agent.RunConfig{}))
+	if second != testSessionOneTwo {
+		t.Fatalf("second final text = %q, want session-1:two", second)
+	}
+}
+
+func TestAgentBootstrapsInstructionsPerADKSession(t *testing.T) {
+	workingDir := t.TempDir()
+	expectedPromptsJSON := `["project=relay cwd=` + workingDir + `","one","project=relay cwd=` + workingDir + `","two"]`
+
+	a, err := New(Config{
+		Context: context.Background(),
+		Command: helperCommandWithEnv(t, map[string]string{
+			"GO_EXPECT_SESSION_CWD": workingDir,
+			"GO_EXPECT_PROMPTS":     expectedPromptsJSON,
+		}),
+		WorkingDir:  workingDir,
+		Instruction: "project={project} cwd={cwd}",
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer func() { _ = a.Close() }()
+
+	sessionService := session.InMemoryService()
+	r, err := runnerpkg.New(runnerpkg.Config{
+		AppName:        "test-app",
+		Agent:          a,
+		SessionService: sessionService,
+	})
+	if err != nil {
+		t.Fatalf("runner.New() error = %v", err)
+	}
+	firstSession, err := sessionService.Create(context.Background(), &session.CreateRequest{
+		AppName: "test-app",
+		UserID:  "test-user",
+		State: map[string]any{
+			"cwd":     workingDir,
+			"project": "relay",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Create(firstSession) error = %v", err)
+	}
+	secondSession, err := sessionService.Create(context.Background(), &session.CreateRequest{
+		AppName: "test-app",
+		UserID:  "test-user",
+		State: map[string]any{
+			"cwd":     workingDir,
+			"project": "relay",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Create(secondSession) error = %v", err)
+	}
+
+	first := collectFinalText(t, r.Run(context.Background(), "test-user", firstSession.Session.ID(), genai.NewContentFromText("one", genai.RoleUser), agent.RunConfig{}))
+	if first != testSessionOneOne {
+		t.Fatalf("first final text = %q, want session-1:one", first)
+	}
+	second := collectFinalText(t, r.Run(context.Background(), "test-user", secondSession.Session.ID(), genai.NewContentFromText("two", genai.RoleUser), agent.RunConfig{}))
+	if second != testSessionTwoTwo {
+		t.Fatalf("second final text = %q, want session-2:two", second)
 	}
 }
 
@@ -1205,10 +1317,10 @@ func TestAgentWarnsAndKeepsBindingWhenSessionConfigChanges(t *testing.T) {
 		}),
 	))
 
-	if first != "session-1:one" {
+	if first != testSessionOneOne {
 		t.Fatalf("first final text = %q, want session-1:one", first)
 	}
-	if second != "session-1:two" {
+	if second != testSessionOneTwo {
 		t.Fatalf("second final text = %q, want session-1:two", second)
 	}
 
@@ -1921,10 +2033,15 @@ func runACPHelper(stdin *os.File, stdout *os.File) {
 	expectedSessionCWD := os.Getenv("GO_EXPECT_SESSION_CWD")
 	expectedNewSessionMetaSessionID := os.Getenv("GO_EXPECT_NEW_SESSION_META_SESSION_ID")
 	expectedNewSessionMetaRaw := os.Getenv("GO_EXPECT_NEW_SESSION_META_RAW")
+	expectedPromptsRaw := os.Getenv("GO_EXPECT_PROMPTS")
 	forceNewSessionID := os.Getenv("GO_FORCE_NEW_SESSION_ID")
 	disableSetModel := os.Getenv("GO_DISABLE_SET_MODEL") == "1"
 	disableSetMode := os.Getenv("GO_DISABLE_SET_MODE") == "1"
 	failFirstPromptEntityNotFound := os.Getenv("GO_FAIL_FIRST_PROMPT_ENTITY_NOT_FOUND") == "1"
+	var expectedPrompts []string
+	if strings.TrimSpace(expectedPromptsRaw) != "" {
+		must(json.Unmarshal([]byte(expectedPromptsRaw), &expectedPrompts))
+	}
 
 	for scanner.Scan() {
 		var msg helperEnvelope
@@ -2101,6 +2218,25 @@ func runACPHelper(stdin *os.File, stdout *os.File) {
 				continue
 			}
 			prompt := req.Prompt[0].Text
+			if len(expectedPrompts) > 0 {
+				if promptCount > len(expectedPrompts) {
+					writeEnvelope(stdout, helperEnvelope{
+						JSONRPC: "2.0",
+						ID:      msg.ID,
+						Error:   &helperError{Code: -32000, Message: fmt.Sprintf("unexpected extra prompt %d: %q", promptCount, prompt)},
+					})
+					continue
+				}
+				wantPrompt := expectedPrompts[promptCount-1]
+				if prompt != wantPrompt {
+					writeEnvelope(stdout, helperEnvelope{
+						JSONRPC: "2.0",
+						ID:      msg.ID,
+						Error:   &helperError{Code: -32000, Message: fmt.Sprintf("unexpected prompt[%d]: %q, want %q", promptCount, prompt, wantPrompt)},
+					})
+					continue
+				}
+			}
 			if strings.HasPrefix(prompt, "slow:") {
 				time.Sleep(150 * time.Millisecond)
 				prompt = strings.TrimPrefix(prompt, "slow:")
