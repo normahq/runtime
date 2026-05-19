@@ -1990,6 +1990,98 @@ func TestAgentConfigMCPServersUseEmptyArraysNotNull(t *testing.T) {
 	}
 }
 
+func TestAgentRunStoresOutputKeyInFinalStateDelta(t *testing.T) {
+	a, err := New(Config{
+		Context:    context.Background(),
+		Command:    helperCommand(t),
+		WorkingDir: t.TempDir(),
+		OutputKey:  "result",
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer func() { _ = a.Close() }()
+
+	sessionService := session.InMemoryService()
+	r, err := runnerpkg.New(runnerpkg.Config{
+		AppName:        "test-app",
+		Agent:          a,
+		SessionService: sessionService,
+	})
+	if err != nil {
+		t.Fatalf("runner.New() error = %v", err)
+	}
+	sess, err := sessionService.Create(context.Background(), &session.CreateRequest{
+		AppName: "test-app",
+		UserID:  "test-user",
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	var finalOutput string
+	for ev, runErr := range r.Run(
+		context.Background(),
+		"test-user",
+		sess.Session.ID(),
+		genai.NewContentFromText("hello", genai.RoleUser),
+		agent.RunConfig{},
+	) {
+		if runErr != nil {
+			t.Fatalf("runner event error = %v", runErr)
+		}
+		if ev == nil {
+			continue
+		}
+		if !ev.TurnComplete {
+			if ev.Actions.StateDelta != nil {
+				if _, ok := ev.Actions.StateDelta["result"]; ok {
+					t.Fatalf("partial event unexpectedly contains output key state delta")
+				}
+			}
+			continue
+		}
+		got, ok := ev.Actions.StateDelta["result"]
+		if !ok {
+			t.Fatalf("turn-complete event missing output key state delta")
+		}
+		output, ok := got.(string)
+		if !ok {
+			t.Fatalf("output key value type = %T, want string", got)
+		}
+		finalOutput = output
+	}
+
+	if finalOutput != testSessionOneHello {
+		t.Fatalf("final output state = %q, want %q", finalOutput, testSessionOneHello)
+	}
+
+	stored, err := sessionService.Get(context.Background(), &session.GetRequest{
+		AppName:   "test-app",
+		UserID:    "test-user",
+		SessionID: sess.Session.ID(),
+	})
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	storedOutput, err := stored.Session.State().Get("result")
+	if err != nil {
+		t.Fatalf("State().Get(\"result\") error = %v", err)
+	}
+	if storedOutput != testSessionOneHello {
+		t.Fatalf("stored output state = %v, want %q", storedOutput, testSessionOneHello)
+	}
+}
+
+func TestAgentMaybeSaveOutputToStateSkipsEmptyOutput(t *testing.T) {
+	a := &Agent{outputKey: "result"}
+	ev := session.NewEvent("inv-1")
+	a.maybeSaveOutputToState(ev, "")
+	if _, ok := ev.Actions.StateDelta["result"]; ok {
+		t.Fatalf("state delta unexpectedly contains result for empty output")
+	}
+}
+
 func helperCommand(t *testing.T) []string {
 	return helperCommandWithEnv(t, nil)
 }

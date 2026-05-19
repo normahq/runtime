@@ -87,6 +87,10 @@ type Config struct {
 	// SessionID is an optional desired session ID to request when creating ACP sessions.
 	// It is sent via session/new _meta.sessionId and may be ignored by some ACP runtimes.
 	SessionID string
+	// OutputKey stores the final visible model output in session state delta for this invocation.
+	// When set, the final non-partial turn-complete event includes
+	// event.Actions.StateDelta[OutputKey] = final visible output text.
+	OutputKey string
 }
 
 // Agent adapts an Agentic Computing Protocol (ACP) runtime to the ADK agent interface.
@@ -99,6 +103,7 @@ type Agent struct {
 	sessionModel              string
 	sessionMode               string
 	sessionID                 string
+	outputKey                 string
 	instruction               string
 	globalInstruction         string
 	instructionProvider       InstructionProvider
@@ -230,6 +235,7 @@ func New(cfg Config) (*Agent, error) {
 		sessionModel:              strings.TrimSpace(cfg.Model),
 		sessionMode:               strings.TrimSpace(cfg.Mode),
 		sessionID:                 strings.TrimSpace(cfg.SessionID),
+		outputKey:                 strings.TrimSpace(cfg.OutputKey),
 		instruction:               normalizeInstruction(cfg.Instruction, cfg.SystemInstructions),
 		globalInstruction:         strings.TrimSpace(cfg.GlobalInstruction),
 		instructionProvider:       cfg.InstructionProvider,
@@ -356,18 +362,30 @@ func (a *Agent) run(ctx adkagent.InvocationContext) iter.Seq2[*session.Event, er
 			ev.FinishReason = mapACPStopReasonToFinishReason(promptResult.Response.StopReason)
 			ev.UsageMetadata = mapACPUsageToUsageMetadata(promptResult.Usage)
 		}
-		if finalText.Len() > 0 {
-			ev.Content = genai.NewContentFromText(finalText.String(), genai.RoleModel)
+		finalOutput := finalText.String()
+		if finalOutput != "" {
+			ev.Content = genai.NewContentFromText(finalOutput, genai.RoleModel)
 		}
 		if latestPlanSnapshot != nil {
 			ev.Actions.StateDelta[PlanStateKey] = latestPlanSnapshot
 		}
+		a.maybeSaveOutputToState(ev, finalOutput)
 		ev.TurnComplete = true
 		a.logADKEvent(logger, ev, "yielding final turn complete event")
 		if !yield(ev, nil) {
 			return
 		}
 	}
+}
+
+func (a *Agent) maybeSaveOutputToState(event *session.Event, output string) {
+	if a.outputKey == "" || event == nil || event.Partial || output == "" {
+		return
+	}
+	if event.Actions.StateDelta == nil {
+		event.Actions.StateDelta = make(map[string]any)
+	}
+	event.Actions.StateDelta[a.outputKey] = output
 }
 
 func (a *Agent) ensureInstructionInitialized(

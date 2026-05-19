@@ -426,9 +426,11 @@ func TestACPConstructor_UsesInstructionAndGlobalInstruction(t *testing.T) {
 
 	var capturedInstruction string
 	var capturedGlobalInstruction string
+	var capturedOutputKey string
 	newACPAgent = func(cfg acpagent.Config) (agent.Agent, error) {
 		capturedInstruction = cfg.Instruction
 		capturedGlobalInstruction = cfg.GlobalInstruction
+		capturedOutputKey = cfg.OutputKey
 		return nil, nil
 	}
 
@@ -440,6 +442,7 @@ func TestACPConstructor_UsesInstructionAndGlobalInstruction(t *testing.T) {
 		AgentID:           "test-acp",
 		Instruction:       "from-request",
 		GlobalInstruction: "global-request",
+		OutputKey:         "agent_result",
 		WorkingDirectory:  t.TempDir(),
 	}, New(map[string]agentconfig.Config{}, nil), nil)
 	if err != nil {
@@ -451,6 +454,9 @@ func TestACPConstructor_UsesInstructionAndGlobalInstruction(t *testing.T) {
 	}
 	if capturedGlobalInstruction != "global-request" {
 		t.Fatalf("cfg.GlobalInstruction = %q, want global-request", capturedGlobalInstruction)
+	}
+	if capturedOutputKey != "agent_result" {
+		t.Fatalf("cfg.OutputKey = %q, want agent_result", capturedOutputKey)
 	}
 }
 

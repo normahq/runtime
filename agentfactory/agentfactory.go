@@ -40,6 +40,8 @@ type BuildRequest struct {
 	MCPServerIDs []string `json:"mcp_server_ids,omitempty"`
 	// SessionID requests a specific remote session identifier when supported.
 	SessionID string `json:"session_id,omitempty"`
+	// OutputKey stores the final visible model output in session state for this invocation.
+	OutputKey string `json:"output_key,omitempty"`
 }
 
 var buildRequestValidator = newBuildRequestValidator()
@@ -467,6 +469,7 @@ var acpConstructor = func(ctx context.Context, cfg agentconfig.ResolvedConfig, r
 		Logger:            loggerFromContext(ctx),
 		MCPServers:        toRuntimeMCPServers(resolvedMCP),
 		SessionID:         req.SessionID,
+		OutputKey:         strings.TrimSpace(req.OutputKey),
 	})
 }
 
