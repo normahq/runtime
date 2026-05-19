@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -169,6 +170,12 @@ const (
 var _ adkagent.Agent = (*Agent)(nil)
 
 var placeholderRegex = regexp.MustCompile(`{+[^{}]*}+`)
+
+const (
+	appPrefix  = "app:"
+	userPrefix = "user:"
+	tempPrefix = "temp:"
+)
 
 // New creates an ADK agent backed by an ACP client process.
 //
@@ -836,13 +843,7 @@ func replaceTemplateMatch(ctx adkagent.InvocationContext, match string) (string,
 			if optional {
 				return "", nil
 			}
-			return "", fmt.Errorf("load artifact %q: %w", after, err)
-		}
-		if resp == nil || resp.Part == nil {
-			if optional {
-				return "", nil
-			}
-			return "", fmt.Errorf("artifact %q has no content", after)
+			return "", fmt.Errorf("failed to load artifact %s: %w", after, err)
 		}
 		return resp.Part.Text, nil
 	}
@@ -869,14 +870,15 @@ func isValidStateName(varName string) bool {
 	if len(parts) == 1 {
 		return isIdentifier(varName)
 	}
-	if len(parts) != 2 {
-		return false
+
+	if len(parts) == 2 {
+		prefix := parts[0] + ":"
+		validPrefixes := []string{appPrefix, userPrefix, tempPrefix}
+		if slices.Contains(validPrefixes, prefix) {
+			return isIdentifier(parts[1])
+		}
 	}
-	prefix := parts[0] + ":"
-	if prefix != "app:" && prefix != "user:" && prefix != "temp:" {
-		return false
-	}
-	return isIdentifier(parts[1])
+	return false
 }
 
 func isIdentifier(value string) bool {

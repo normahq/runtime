@@ -21,6 +21,7 @@ import (
 	acp "github.com/coder/acp-go-sdk"
 	"github.com/rs/zerolog"
 	"google.golang.org/adk/agent"
+	"google.golang.org/adk/artifact"
 	runnerpkg "google.golang.org/adk/runner"
 	"google.golang.org/adk/session"
 	"google.golang.org/genai"
@@ -1065,12 +1066,159 @@ func TestAgentBootstrapsInstructionsPerADKSession(t *testing.T) {
 }
 
 func TestAgentFailsWhenInstructionTemplateRequiresMissingState(t *testing.T) {
+	assertInstructionTemplateRunError(t, "missing={not_set}", "inject session state into instruction")
+}
+
+func TestAgentInjectsOptionalMissingStateIntoInstruction(t *testing.T) {
+	assertInstructionTemplateBootstrapAndRun(
+		t,
+		"optional={missing?}",
+		`["optional=","hello"]`,
+		map[string]any{},
+	)
+}
+
+func TestAgentLeavesInvalidStateNamesLiteralInInstruction(t *testing.T) {
+	assertInstructionTemplateBootstrapAndRun(
+		t,
+		"invalid={invalid-key} prefix={invalid:key}",
+		`["invalid={invalid-key} prefix={invalid:key}","hello"]`,
+		map[string]any{},
+	)
+}
+
+func TestAgentInjectsPrefixedStateIntoInstruction(t *testing.T) {
+	assertInstructionTemplateBootstrapAndRun(
+		t,
+		"prefixed={app:user_name}",
+		`["prefixed=Foo","hello"]`,
+		map[string]any{"app:user_name": "Foo"},
+	)
+}
+
+func TestAgentFailsWhenInstructionTemplateRequiresArtifactWithoutService(t *testing.T) {
+	assertInstructionTemplateRunError(t, "artifact={artifact.my_file}", "artifact service is not initialized")
+}
+
+func TestAgentInjectsArtifactsIntoInstruction(t *testing.T) {
+	workingDir := t.TempDir()
+	expectedPromptsJSON := `["artifact=artifact-content optional=","hello"]`
+
+	a, err := New(Config{
+		Context: context.Background(),
+		Command: helperCommandWithEnv(t, map[string]string{
+			"GO_EXPECT_SESSION_CWD": workingDir,
+			"GO_EXPECT_PROMPTS":     expectedPromptsJSON,
+		}),
+		WorkingDir:  workingDir,
+		Instruction: "artifact={artifact.my_file} optional={artifact.other_file?}",
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer func() { _ = a.Close() }()
+
+	artifactService := artifact.InMemoryService()
+	sessionService := session.InMemoryService()
+	r, err := runnerpkg.New(runnerpkg.Config{
+		AppName:           "test-app",
+		Agent:             a,
+		SessionService:    sessionService,
+		ArtifactService:   artifactService,
+		AutoCreateSession: false,
+	})
+	if err != nil {
+		t.Fatalf("runner.New() error = %v", err)
+	}
+	sess, err := sessionService.Create(context.Background(), &session.CreateRequest{
+		AppName: "test-app",
+		UserID:  "test-user",
+		State: map[string]any{
+			"cwd": workingDir,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	_, err = artifactService.Save(context.Background(), &artifact.SaveRequest{
+		AppName:   "test-app",
+		UserID:    "test-user",
+		SessionID: sess.Session.ID(),
+		FileName:  "my_file",
+		Part:      &genai.Part{Text: "artifact-content"},
+	})
+	if err != nil {
+		t.Fatalf("artifact.Save() error = %v", err)
+	}
+
+	got := collectFinalText(t, r.Run(context.Background(), "test-user", sess.Session.ID(), genai.NewContentFromText("hello", genai.RoleUser), agent.RunConfig{}))
+	if got != testSessionOneHello {
+		t.Fatalf("final text = %q, want %s", got, testSessionOneHello)
+	}
+}
+
+func assertInstructionTemplateBootstrapAndRun(
+	t *testing.T,
+	instruction string,
+	expectedPromptsJSON string,
+	extraState map[string]any,
+) {
+	t.Helper()
+
+	workingDir := t.TempDir()
+	a, err := New(Config{
+		Context: context.Background(),
+		Command: helperCommandWithEnv(t, map[string]string{
+			"GO_EXPECT_SESSION_CWD": workingDir,
+			"GO_EXPECT_PROMPTS":     expectedPromptsJSON,
+		}),
+		WorkingDir:  workingDir,
+		Instruction: instruction,
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer func() { _ = a.Close() }()
+
+	sessionService := session.InMemoryService()
+	r, err := runnerpkg.New(runnerpkg.Config{
+		AppName:        "test-app",
+		Agent:          a,
+		SessionService: sessionService,
+	})
+	if err != nil {
+		t.Fatalf("runner.New() error = %v", err)
+	}
+
+	state := map[string]any{"cwd": workingDir}
+	for k, v := range extraState {
+		state[k] = v
+	}
+
+	sess, err := sessionService.Create(context.Background(), &session.CreateRequest{
+		AppName: "test-app",
+		UserID:  "test-user",
+		State:   state,
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	got := collectFinalText(t, r.Run(context.Background(), "test-user", sess.Session.ID(), genai.NewContentFromText("hello", genai.RoleUser), agent.RunConfig{}))
+	if got != testSessionOneHello {
+		t.Fatalf("final text = %q, want %s", got, testSessionOneHello)
+	}
+}
+
+func assertInstructionTemplateRunError(t *testing.T, instruction string, wantErrSubstring string) {
+	t.Helper()
+
 	workingDir := t.TempDir()
 	a, err := New(Config{
 		Context:     context.Background(),
 		Command:     helperCommandWithEnv(t, map[string]string{"GO_EXPECT_SESSION_CWD": workingDir}),
 		WorkingDir:  workingDir,
-		Instruction: "missing={not_set}",
+		Instruction: instruction,
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -1104,10 +1252,10 @@ func TestAgentFailsWhenInstructionTemplateRequiresMissingState(t *testing.T) {
 		}
 	}
 	if runErr == nil {
-		t.Fatal("run error = nil, want missing state template error")
+		t.Fatalf("run error = nil, want %q", wantErrSubstring)
 	}
-	if !strings.Contains(runErr.Error(), "inject session state into instruction") {
-		t.Fatalf("run error = %q, want inject session state into instruction", runErr)
+	if !strings.Contains(runErr.Error(), wantErrSubstring) {
+		t.Fatalf("run error = %q, want %q", runErr, wantErrSubstring)
 	}
 }
 
