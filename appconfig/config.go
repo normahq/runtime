@@ -8,7 +8,7 @@ import (
 
 	"github.com/go-playground/validator/v10"
 	"github.com/go-viper/mapstructure/v2"
-	"github.com/normahq/runtime/agentconfig"
+	"github.com/normahq/runtime/v2/agentconfig"
 )
 
 // RuntimeConfig contains runtime agent-factory settings.

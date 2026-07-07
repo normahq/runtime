@@ -6,10 +6,10 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/normahq/runtime/agentconfig"
+	"github.com/normahq/runtime/v2/agentconfig"
 
-	"google.golang.org/adk/agent"
-	"google.golang.org/adk/session"
+	"google.golang.org/adk/v2/agent"
+	"google.golang.org/adk/v2/session"
 	"iter"
 )
 

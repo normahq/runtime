@@ -96,7 +96,7 @@ func TestConfigValidate(t *testing.T) {
 			},
 		},
 		{
-			name: "openai_rejects_mcp_servers",
+			name: "openai_accepts_mcp_servers",
 			cfg: Config{
 				Type:       AgentTypeOpenAI,
 				MCPServers: []string{"workspace"},
@@ -104,7 +104,32 @@ func TestConfigValidate(t *testing.T) {
 					Model: "gpt-5",
 				},
 			},
-			wantErr: "mcp_servers is not supported for type openai",
+		},
+		{
+			name: "valid_codex_reasoning_effort",
+			cfg: Config{
+				Type: AgentTypeCodexACP,
+				CodexACP: &ACPConfig{
+					ReasoningEffort: "high",
+				},
+			},
+		},
+		{
+			name: "valid_copilot_alias_default",
+			cfg: Config{
+				Type: AgentTypeCopilotACP,
+			},
+		},
+		{
+			name: "reasoning_effort_rejected_for_generic_acp",
+			cfg: Config{
+				Type: AgentTypeGenericACP,
+				GenericACP: &ACPConfig{
+					Cmd:             []string{"custom-acp", "--stdio"},
+					ReasoningEffort: "high",
+				},
+			},
+			wantErr: "reasoning_effort is only supported for type codex_acp",
 		},
 		{
 			name: "valid_aistudio",
@@ -185,17 +210,19 @@ func TestNormalizeConfig(t *testing.T) {
 			cfg: Config{
 				Type: AgentTypeCodexACP,
 				CodexACP: &ACPConfig{
-					Model:     "gpt-5-codex",
-					Mode:      "code",
-					ExtraArgs: []string{"--trace"},
+					Model:           "gpt-5-codex",
+					ReasoningEffort: "high",
+					Mode:            "code",
+					ExtraArgs:       []string{"--trace"},
 				},
 			},
 			exec: execPath,
 			want: ResolvedConfig{
-				Type:    AgentTypeGenericACP,
-				Command: []string{"npx", "-y", "@normahq/codex-acp-bridge@latest", "--trace"},
-				Model:   "gpt-5-codex",
-				Mode:    "code",
+				Type:            AgentTypeGenericACP,
+				Command:         []string{"npx", "-y", codexACPBridgePackage, "--trace"},
+				Model:           "gpt-5-codex",
+				Mode:            "code",
+				ReasoningEffort: "high",
 			},
 		},
 		{
@@ -207,8 +234,19 @@ func TestNormalizeConfig(t *testing.T) {
 			exec: execPath,
 			want: ResolvedConfig{
 				Type:    AgentTypeGenericACP,
-				Command: []string{"copilot", "--acp", "--trace"},
+				Command: []string{"copilot", "--acp", "--stdio", "--trace"},
 				Model:   "gpt-5-codex",
+			},
+		},
+		{
+			name: "copilot_alias_default",
+			cfg: Config{
+				Type: AgentTypeCopilotACP,
+			},
+			exec: execPath,
+			want: ResolvedConfig{
+				Type:    AgentTypeGenericACP,
+				Command: []string{"copilot", "--acp", "--stdio"},
 			},
 		},
 		{
@@ -338,6 +376,24 @@ func TestNormalizeConfig_DoesNotMutateSchemaConfig(t *testing.T) {
 	}
 }
 
+func TestNormalizeConfig_RejectsReasoningEffortForUnsupportedTypes(t *testing.T) {
+	t.Parallel()
+
+	_, err := NormalizeConfig(Config{
+		Type: AgentTypeGenericACP,
+		GenericACP: &ACPConfig{
+			Cmd:             []string{"custom-acp"},
+			ReasoningEffort: "high",
+		},
+	}, "/tmp/norma")
+	if err == nil {
+		t.Fatal("NormalizeConfig() error = nil, want unsupported reasoning_effort error")
+	}
+	if got := err.Error(); got != "reasoning_effort is only supported for type codex_acp" {
+		t.Fatalf("NormalizeConfig() error = %q, want unsupported reasoning_effort error", got)
+	}
+}
+
 func TestNormalizeConfigs(t *testing.T) {
 	t.Parallel()
 
@@ -389,8 +445,8 @@ func TestNormalizeConfigs(t *testing.T) {
 	if checkCfg.Type != AgentTypeGenericACP {
 		t.Fatalf("check type = %q, want %q", checkCfg.Type, AgentTypeGenericACP)
 	}
-	if len(checkCfg.Command) < 3 || checkCfg.Command[0] != "npx" || checkCfg.Command[1] != "-y" || checkCfg.Command[2] != "@normahq/codex-acp-bridge@latest" {
-		t.Fatalf("check command = %v, want npx -y @normahq/codex-acp-bridge@latest", checkCfg.Command)
+	if len(checkCfg.Command) < 3 || checkCfg.Command[0] != "npx" || checkCfg.Command[1] != "-y" || checkCfg.Command[2] != codexACPBridgePackage {
+		t.Fatalf("check command = %v, want npx -y %s", checkCfg.Command, codexACPBridgePackage)
 	}
 
 	actCfg := got["act"]
@@ -410,8 +466,9 @@ func TestConfigYAMLTags(t *testing.T) {
 		MCPServers:         []string{"workspace"},
 		SystemInstructions: "system",
 		CodexACP: &ACPConfig{
-			ExtraArgs: []string{"--trace"},
-			Model:     "gpt-5-codex",
+			ExtraArgs:       []string{"--trace"},
+			Model:           "gpt-5-codex",
+			ReasoningEffort: "high",
 		},
 	})
 	if err != nil {
@@ -421,6 +478,7 @@ func TestConfigYAMLTags(t *testing.T) {
 	text := string(data)
 	for _, want := range []string{
 		"mcp_servers:",
+		"reasoning_effort:",
 		"system_instructions:",
 		"codex_acp:",
 		"extra_args:",
@@ -432,6 +490,7 @@ func TestConfigYAMLTags(t *testing.T) {
 
 	for _, unwanted := range []string{
 		"mcpservers:",
+		"reasoningeffort:",
 		"systeminstructions:",
 		"codexacp:",
 		"extraargs:",

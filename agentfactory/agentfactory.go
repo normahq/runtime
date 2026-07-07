@@ -4,22 +4,27 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
+	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
 
 	"github.com/go-playground/validator/v10"
-	"github.com/normahq/runtime/acpagent"
-	"github.com/normahq/runtime/agentconfig"
-	"github.com/normahq/runtime/hostedagent"
-	"github.com/normahq/runtime/mcpregistry"
-	"github.com/normahq/runtime/poolagent"
-	"github.com/normahq/runtime/sessionstate"
-	"github.com/rs/zerolog"
-	"google.golang.org/adk/agent"
-	"google.golang.org/adk/model"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/normahq/go-adk-acpagent/v2"
+	"github.com/normahq/runtime/v2/agentconfig"
+	"github.com/normahq/runtime/v2/hostedagent"
+	"github.com/normahq/runtime/v2/mcpregistry"
+	"github.com/normahq/runtime/v2/poolagent"
+	"github.com/normahq/runtime/v2/sessionstate"
+	"google.golang.org/adk/v2/agent"
+	"google.golang.org/adk/v2/model"
+	"google.golang.org/adk/v2/tool"
+	"google.golang.org/adk/v2/tool/mcptoolset"
 )
 
 // BuildRequest defines the parameters for building a new agent instance.
@@ -34,14 +39,18 @@ type BuildRequest struct {
 	Instruction string `json:"instruction,omitempty"`
 	// GlobalInstruction is prepended ahead of Instruction for each invocation.
 	GlobalInstruction string `json:"global_instruction,omitempty"`
+	// ReasoningEffort overrides the provider reasoning effort when supported.
+	ReasoningEffort string `json:"reasoning_effort,omitempty" validate:"omitempty,oneof=minimal low medium high xhigh"`
 	// WorkingDirectory is the session working directory for the built agent.
 	WorkingDirectory string `json:"working_directory" validate:"required,min=1"`
 	// MCPServerIDs overrides provider-level MCP server references for this build.
 	MCPServerIDs []string `json:"mcp_server_ids,omitempty"`
-	// SessionID requests a specific remote session identifier when supported.
-	SessionID string `json:"session_id,omitempty"`
 	// OutputKey stores the final visible model output in session state for this invocation.
 	OutputKey string `json:"output_key,omitempty"`
+	// Tools contains ADK-native tools supplied by the caller for this build.
+	Tools []tool.Tool `json:"-"`
+	// Toolsets contains ADK-native toolsets supplied by the caller for this build.
+	Toolsets []tool.Toolset `json:"-"`
 }
 
 var buildRequestValidator = newBuildRequestValidator()
@@ -348,6 +357,102 @@ func toRuntimeMCPServers(configs map[string]agentconfig.MCPServerConfig) map[str
 	return runtimeConfigs
 }
 
+func hostedToolsets(requestToolsets []tool.Toolset, resolvedMCP map[string]agentconfig.MCPServerConfig) ([]tool.Toolset, error) {
+	toolsets := append([]tool.Toolset(nil), requestToolsets...)
+	if len(resolvedMCP) == 0 {
+		return toolsets, nil
+	}
+
+	ids := make([]string, 0, len(resolvedMCP))
+	for id := range resolvedMCP {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+
+	for _, id := range ids {
+		transport, err := mcpTransportForConfig(resolvedMCP[id])
+		if err != nil {
+			return nil, fmt.Errorf("create mcp transport %q: %w", id, err)
+		}
+		toolset, err := mcptoolset.New(mcptoolset.Config{Transport: transport})
+		if err != nil {
+			return nil, fmt.Errorf("create mcp toolset %q: %w", id, err)
+		}
+		toolsets = append(toolsets, toolset)
+	}
+	return toolsets, nil
+}
+
+func mcpTransportForConfig(cfg agentconfig.MCPServerConfig) (mcp.Transport, error) {
+	switch cfg.Type {
+	case agentconfig.MCPServerTypeStdio:
+		if len(cfg.Cmd) == 0 {
+			return nil, fmt.Errorf("stdio mcp server requires cmd")
+		}
+		args := append([]string(nil), cfg.Cmd[1:]...)
+		args = append(args, cfg.Args...)
+		cmd := exec.Command(cfg.Cmd[0], args...)
+		cmd.Dir = strings.TrimSpace(cfg.WorkingDir)
+		cmd.Env = stringMapEnv(cfg.Env)
+		return &mcp.CommandTransport{Command: cmd}, nil
+	case agentconfig.MCPServerTypeHTTP:
+		return &mcp.StreamableClientTransport{
+			Endpoint:   strings.TrimSpace(cfg.URL),
+			HTTPClient: httpClientWithHeaders(cfg.Headers),
+		}, nil
+	case agentconfig.MCPServerTypeSSE:
+		return &mcp.SSEClientTransport{
+			Endpoint:   strings.TrimSpace(cfg.URL),
+			HTTPClient: httpClientWithHeaders(cfg.Headers),
+		}, nil
+	default:
+		return nil, fmt.Errorf("unsupported mcp server type %q", cfg.Type)
+	}
+}
+
+func stringMapEnv(env map[string]string) []string {
+	if len(env) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(env))
+	for key := range env {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	out := make([]string, 0, len(keys))
+	for _, key := range keys {
+		out = append(out, key+"="+env[key])
+	}
+	return out
+}
+
+func httpClientWithHeaders(headers map[string]string) *http.Client {
+	if len(headers) == 0 {
+		return nil
+	}
+	return &http.Client{Transport: staticHeaderRoundTripper{
+		base:    http.DefaultTransport,
+		headers: cloneStringMap(headers),
+	}}
+}
+
+type staticHeaderRoundTripper struct {
+	base    http.RoundTripper
+	headers map[string]string
+}
+
+func (t staticHeaderRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	clone := req.Clone(req.Context())
+	for key, value := range t.headers {
+		clone.Header.Set(key, value)
+	}
+	base := t.base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	return base.RoundTrip(clone)
+}
+
 func toRuntimeMCPServerType(serverType agentconfig.MCPServerType) acpagent.MCPServerType {
 	switch serverType {
 	case agentconfig.MCPServerTypeStdio:
@@ -404,20 +509,6 @@ var newOpenAIModel = newOpenAIModelDefault
 
 var newAIStudioModel = newAIStudioModelDefault
 
-func loggerFromContext(ctx context.Context) *zerolog.Logger {
-	if ctx == nil {
-		l := zerolog.Nop()
-		return &l
-	}
-	ctxLogger := zerolog.Ctx(ctx)
-	if ctxLogger == nil || ctxLogger == zerolog.DefaultContextLogger || ctxLogger.GetLevel() == zerolog.Disabled {
-		l := zerolog.Nop()
-		return &l
-	}
-	l := ctxLogger.With().Logger()
-	return &l
-}
-
 func effectiveName(req BuildRequest) string {
 	name := strings.TrimSpace(req.Name)
 	if name != "" {
@@ -446,34 +537,72 @@ func effectiveGlobalInstruction(req BuildRequest) string {
 	return strings.TrimSpace(req.GlobalInstruction)
 }
 
+func effectiveReasoningEffort(req BuildRequest, cfg agentconfig.ResolvedConfig, schemaType string) (string, error) {
+	override := strings.TrimSpace(req.ReasoningEffort)
+	if override == "" {
+		override = strings.TrimSpace(cfg.ReasoningEffort)
+	}
+	if override == "" {
+		return "", nil
+	}
+	if strings.TrimSpace(schemaType) != agentconfig.AgentTypeCodexACP {
+		return "", fmt.Errorf("reasoning_effort is only supported for type %s", agentconfig.AgentTypeCodexACP)
+	}
+	return override, nil
+}
+
 var acpConstructor = func(ctx context.Context, cfg agentconfig.ResolvedConfig, req BuildRequest, f *Factory, resolvedMCP map[string]agentconfig.MCPServerConfig) (agent.Agent, error) {
 	if cfg.Type != agentconfig.AgentTypeGenericACP {
 		return nil, fmt.Errorf("unknown acp agent type %q", cfg.Type)
 	}
+	if hasRequestTools(req) {
+		return nil, fmt.Errorf("%s agent does not support request tools", cfg.Type)
+	}
 	if len(cfg.Command) == 0 {
 		return nil, fmt.Errorf("generic_acp agent requires cmd")
+	}
+	schemaCfg, err := f.GetAgentConfig(req.AgentID)
+	if err != nil {
+		return nil, err
+	}
+	reasoningEffort, err := effectiveReasoningEffort(req, cfg, schemaCfg.Type)
+	if err != nil {
+		return nil, err
 	}
 
 	return newACPAgent(acpagent.Config{
 		Context:           ctx,
 		Name:              effectiveName(req),
 		Description:       effectiveDescription(req, cfg),
-		Model:             cfg.Model,
-		Mode:              cfg.Mode,
+		SessionConfig:     acpSessionConfigValues(cfg.Model, cfg.Mode),
 		Instruction:       effectiveInstruction(req, cfg),
 		GlobalInstruction: effectiveGlobalInstruction(req),
 		Command:           append([]string(nil), cfg.Command...),
 		WorkingDir:        req.WorkingDirectory,
+		ReasoningEffort:   reasoningEffort,
 		Stderr:            f.stderrWriter,
 		PermissionHandler: f.permissionHandler,
-		Logger:            loggerFromContext(ctx),
+		Logger:            slog.Default().With("component", "runtime.agentfactory.acp"),
 		MCPServers:        toRuntimeMCPServers(resolvedMCP),
-		SessionID:         req.SessionID,
 		OutputKey:         strings.TrimSpace(req.OutputKey),
 	})
 }
 
+func acpSessionConfigValues(modelName, mode string) []acpagent.SessionConfigValue {
+	values := make([]acpagent.SessionConfigValue, 0, 2)
+	if modelName = strings.TrimSpace(modelName); modelName != "" {
+		values = append(values, acpagent.SessionConfigValue{ID: "model", Value: modelName})
+	}
+	if mode = strings.TrimSpace(mode); mode != "" {
+		values = append(values, acpagent.SessionConfigValue{ID: "mode", Value: mode})
+	}
+	return values
+}
+
 var poolConstructor = func(ctx context.Context, cfg agentconfig.ResolvedConfig, req BuildRequest, f *Factory, _ map[string]agentconfig.MCPServerConfig) (agent.Agent, error) {
+	if hasRequestTools(req) {
+		return nil, fmt.Errorf("pool agent does not support request tools")
+	}
 	members, err := validatePoolMembers(req.AgentID, cfg.PoolMembers, f.registry)
 	if err != nil {
 		return nil, err
@@ -499,11 +628,12 @@ var openAIConstructor = func(ctx context.Context, cfg agentconfig.ResolvedConfig
 	if cfg.Type != agentconfig.AgentTypeOpenAI {
 		return nil, fmt.Errorf("unknown openai agent type %q", cfg.Type)
 	}
-	if len(resolvedMCP) > 0 {
-		return nil, fmt.Errorf("openai agent does not support mcp servers")
+	llmModel, err := newOpenAIModel(cfg.APIKey, cfg.Model)
+	if err != nil {
+		return nil, err
 	}
 
-	llmModel, err := newOpenAIModel(cfg.APIKey, cfg.Model)
+	toolsets, err := hostedToolsets(req.Toolsets, resolvedMCP)
 	if err != nil {
 		return nil, err
 	}
@@ -514,6 +644,8 @@ var openAIConstructor = func(ctx context.Context, cfg agentconfig.ResolvedConfig
 		Instruction:       effectiveInstruction(req, cfg),
 		GlobalInstruction: effectiveGlobalInstruction(req),
 		Model:             llmModel,
+		Tools:             append([]tool.Tool(nil), req.Tools...),
+		Toolsets:          toolsets,
 	})
 }
 
@@ -521,11 +653,12 @@ var aistudioConstructor = func(ctx context.Context, cfg agentconfig.ResolvedConf
 	if cfg.Type != agentconfig.AgentTypeAIStudio {
 		return nil, fmt.Errorf("unknown aistudio agent type %q", cfg.Type)
 	}
-	if len(resolvedMCP) > 0 {
-		return nil, fmt.Errorf("aistudio agent does not support mcp servers")
+	llmModel, err := newAIStudioModel(ctx, cfg.APIKey, cfg.Model)
+	if err != nil {
+		return nil, err
 	}
 
-	llmModel, err := newAIStudioModel(ctx, cfg.APIKey, cfg.Model)
+	toolsets, err := hostedToolsets(req.Toolsets, resolvedMCP)
 	if err != nil {
 		return nil, err
 	}
@@ -536,7 +669,13 @@ var aistudioConstructor = func(ctx context.Context, cfg agentconfig.ResolvedConf
 		Instruction:       effectiveInstruction(req, cfg),
 		GlobalInstruction: effectiveGlobalInstruction(req),
 		Model:             llmModel,
+		Tools:             append([]tool.Tool(nil), req.Tools...),
+		Toolsets:          toolsets,
 	})
+}
+
+func hasRequestTools(req BuildRequest) bool {
+	return len(req.Tools) > 0 || len(req.Toolsets) > 0
 }
 
 type factoryAgentCreator struct {

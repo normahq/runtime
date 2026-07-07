@@ -6,21 +6,24 @@ import (
 	"context"
 	"encoding/json"
 	"iter"
+	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	acp "github.com/coder/acp-go-sdk"
-	"github.com/normahq/runtime/acpagent"
-	"github.com/normahq/runtime/agentconfig"
-	"github.com/normahq/runtime/hostedagent"
-	"github.com/normahq/runtime/mcpregistry"
-	"github.com/normahq/runtime/sessionstate"
-	"github.com/rs/zerolog"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/normahq/go-adk-acpagent/v2"
+	"github.com/normahq/runtime/v2/agentconfig"
+	"github.com/normahq/runtime/v2/hostedagent"
+	"github.com/normahq/runtime/v2/mcpregistry"
+	"github.com/normahq/runtime/v2/sessionstate"
 	"github.com/stretchr/testify/assert"
-	"google.golang.org/adk/agent"
-	"google.golang.org/adk/model"
+	"google.golang.org/adk/v2/agent"
+	"google.golang.org/adk/v2/model"
+	"google.golang.org/adk/v2/tool"
 )
 
 type contextKey string
@@ -163,21 +166,113 @@ func TestFactoryBuild_NormalizesTemplatedACPCommand(t *testing.T) {
 	assert.Equal(t, want, capturedCommand)
 }
 
-func TestACPConstructor_PropagatesContextLogger(t *testing.T) {
+func TestFactoryBuild_PropagatesCodexReasoningEffort(t *testing.T) {
 	origNewACPAgent := newACPAgent
 	t.Cleanup(func() {
 		newACPAgent = origNewACPAgent
 	})
 
-	var capturedLogger *zerolog.Logger
+	var capturedReasoningEffort string
+	newACPAgent = func(cfg acpagent.Config) (agent.Agent, error) {
+		capturedReasoningEffort = cfg.ReasoningEffort
+		return nil, nil
+	}
+
+	agents := map[string]agentconfig.Config{
+		"codex": {
+			Type: agentconfig.AgentTypeCodexACP,
+			CodexACP: &agentconfig.ACPConfig{
+				Model:           "gpt-5-codex",
+				ReasoningEffort: "medium",
+			},
+		},
+	}
+	f := New(agents, mcpregistry.New(nil))
+
+	_, err := f.Build(context.Background(), BuildRequest{AgentID: "codex", WorkingDirectory: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	assert.Equal(t, "medium", capturedReasoningEffort)
+}
+
+func TestFactoryBuild_BuildRequestReasoningEffortOverridesProvider(t *testing.T) {
+	origNewACPAgent := newACPAgent
+	t.Cleanup(func() {
+		newACPAgent = origNewACPAgent
+	})
+
+	var capturedReasoningEffort string
+	newACPAgent = func(cfg acpagent.Config) (agent.Agent, error) {
+		capturedReasoningEffort = cfg.ReasoningEffort
+		return nil, nil
+	}
+
+	agents := map[string]agentconfig.Config{
+		"codex": {
+			Type: agentconfig.AgentTypeCodexACP,
+			CodexACP: &agentconfig.ACPConfig{
+				Model:           "gpt-5-codex",
+				ReasoningEffort: "low",
+			},
+		},
+	}
+	f := New(agents, mcpregistry.New(nil))
+
+	_, err := f.Build(context.Background(), BuildRequest{
+		AgentID:          "codex",
+		WorkingDirectory: t.TempDir(),
+		ReasoningEffort:  "high",
+	})
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	assert.Equal(t, "high", capturedReasoningEffort)
+}
+
+func TestFactoryBuild_RejectsReasoningEffortOverrideForUnsupportedType(t *testing.T) {
+	agents := map[string]agentconfig.Config{
+		"test-acp": {
+			Type: agentconfig.AgentTypeGenericACP,
+			GenericACP: &agentconfig.ACPConfig{
+				Cmd: helperACPCommand(t),
+			},
+		},
+	}
+	f := New(agents, mcpregistry.New(nil))
+
+	_, err := f.Build(context.Background(), BuildRequest{
+		AgentID:          "test-acp",
+		WorkingDirectory: t.TempDir(),
+		ReasoningEffort:  "high",
+	})
+	if err == nil {
+		t.Fatal("Build() error = nil, want unsupported reasoning_effort error")
+	}
+	assert.Contains(t, err.Error(), "reasoning_effort is only supported for type codex_acp")
+}
+
+func TestACPConstructor_PassesConfiguredSlogLogger(t *testing.T) {
+	origNewACPAgent := newACPAgent
+	t.Cleanup(func() {
+		newACPAgent = origNewACPAgent
+	})
+
+	var capturedLogger *slog.Logger
 	newACPAgent = func(cfg acpagent.Config) (agent.Agent, error) {
 		capturedLogger = cfg.Logger
 		return nil, nil
 	}
 
-	var logBuf bytes.Buffer
-	baseLogger := zerolog.New(&logBuf).Level(zerolog.TraceLevel)
-	ctx := baseLogger.WithContext(context.Background())
+	ctx := context.Background()
+	factory := New(map[string]agentconfig.Config{
+		"test-acp": {
+			Type: agentconfig.AgentTypeGenericACP,
+			GenericACP: &agentconfig.ACPConfig{
+				Cmd: []string{"fake-acp", "serve"},
+			},
+		},
+	}, nil)
 
 	_, err := acpConstructor(ctx, agentconfig.ResolvedConfig{
 		Type:    agentconfig.AgentTypeGenericACP,
@@ -187,15 +282,15 @@ func TestACPConstructor_PropagatesContextLogger(t *testing.T) {
 		Name:             "test-acp",
 		Description:      "test",
 		WorkingDirectory: t.TempDir(),
-	}, New(map[string]agentconfig.Config{}, nil), nil)
+	}, factory, nil)
 	if err != nil {
 		t.Fatalf("acpConstructor() error = %v", err)
 	}
 	if capturedLogger == nil {
 		t.Fatal("acpConstructor() did not pass logger to acpagent config")
 	}
-	if capturedLogger.GetLevel() != zerolog.TraceLevel {
-		t.Fatalf("captured logger level = %s, want %s", capturedLogger.GetLevel(), zerolog.TraceLevel)
+	if !capturedLogger.Enabled(context.Background(), slog.LevelInfo) {
+		t.Fatal("captured logger should enable info level")
 	}
 }
 
@@ -433,6 +528,14 @@ func TestACPConstructor_UsesInstructionAndGlobalInstruction(t *testing.T) {
 		capturedOutputKey = cfg.OutputKey
 		return nil, nil
 	}
+	factory := New(map[string]agentconfig.Config{
+		"test-acp": {
+			Type: agentconfig.AgentTypeGenericACP,
+			GenericACP: &agentconfig.ACPConfig{
+				Cmd: []string{"fake-acp", "serve"},
+			},
+		},
+	}, nil)
 
 	_, err := acpConstructor(context.Background(), agentconfig.ResolvedConfig{
 		Type:               agentconfig.AgentTypeGenericACP,
@@ -444,7 +547,7 @@ func TestACPConstructor_UsesInstructionAndGlobalInstruction(t *testing.T) {
 		GlobalInstruction: "global-request",
 		OutputKey:         "agent_result",
 		WorkingDirectory:  t.TempDir(),
-	}, New(map[string]agentconfig.Config{}, nil), nil)
+	}, factory, nil)
 	if err != nil {
 		t.Fatalf("acpConstructor() error = %v", err)
 	}
@@ -470,6 +573,34 @@ func (m fakeHostedModel) Name() string {
 
 func (m fakeHostedModel) GenerateContent(context.Context, *model.LLMRequest, bool) iter.Seq2[*model.LLMResponse, error] {
 	return func(func(*model.LLMResponse, error) bool) {}
+}
+
+type requestTool struct {
+	name string
+}
+
+func (t requestTool) Name() string {
+	return t.name
+}
+
+func (requestTool) Description() string {
+	return "request test tool"
+}
+
+func (requestTool) IsLongRunning() bool {
+	return false
+}
+
+type requestToolset struct {
+	name string
+}
+
+func (t requestToolset) Name() string {
+	return t.name
+}
+
+func (requestToolset) Tools(agent.ReadonlyContext) ([]tool.Tool, error) {
+	return nil, nil
 }
 
 func TestFactoryBuild_OpenAIProvider(t *testing.T) {
@@ -502,8 +633,14 @@ func TestFactoryBuild_OpenAIProvider(t *testing.T) {
 				Model:  "gpt-5",
 			},
 			SystemInstructions: "from-config",
+			MCPServers:         []string{"docs"},
 		},
-	}, mcpregistry.New(nil))
+	}, mcpregistry.New(map[string]agentconfig.MCPServerConfig{
+		"docs": {
+			Type: agentconfig.MCPServerTypeHTTP,
+			URL:  "http://docs.example/mcp",
+		},
+	}))
 
 	_, err := f.Build(context.Background(), BuildRequest{
 		AgentID:           "openai",
@@ -512,6 +649,8 @@ func TestFactoryBuild_OpenAIProvider(t *testing.T) {
 		Instruction:       "from-request",
 		GlobalInstruction: "global-request",
 		WorkingDirectory:  t.TempDir(),
+		Tools:             []tool.Tool{requestTool{name: "read_file"}},
+		Toolsets:          []tool.Toolset{requestToolset{name: "review_tools"}},
 	})
 	if err != nil {
 		t.Fatalf("Build() error = %v", err)
@@ -537,6 +676,127 @@ func TestFactoryBuild_OpenAIProvider(t *testing.T) {
 	}
 	if capturedCfg.Model == nil || capturedCfg.Model.Name() != "remote-openai" {
 		t.Fatalf("hosted agent model = %#v, want remote-openai", capturedCfg.Model)
+	}
+	if len(capturedCfg.Tools) != 1 || capturedCfg.Tools[0].Name() != "read_file" {
+		t.Fatalf("hosted agent tools = %#v, want read_file", capturedCfg.Tools)
+	}
+	if len(capturedCfg.Toolsets) != 2 {
+		t.Fatalf("hosted agent toolsets = %#v, want request and mcp toolsets", capturedCfg.Toolsets)
+	}
+	if capturedCfg.Toolsets[0].Name() != "review_tools" {
+		t.Fatalf("hosted agent request toolset = %q, want review_tools", capturedCfg.Toolsets[0].Name())
+	}
+	if capturedCfg.Toolsets[1].Name() != "mcp_tool_set" {
+		t.Fatalf("hosted agent mcp toolset = %q, want mcp_tool_set", capturedCfg.Toolsets[1].Name())
+	}
+}
+
+func TestMCPTransportForConfig_StdioPreservesProcessConfig(t *testing.T) {
+	transport, err := mcpTransportForConfig(agentconfig.MCPServerConfig{
+		Type:       agentconfig.MCPServerTypeStdio,
+		Cmd:        []string{"mcp-server", "--from-cmd"},
+		Args:       []string{"--from-args"},
+		Env:        map[string]string{"BETA": "2", "ALPHA": "1"},
+		WorkingDir: "/tmp/mcp-work",
+	})
+	if err != nil {
+		t.Fatalf("mcpTransportForConfig() error = %v", err)
+	}
+	cmdTransport, ok := transport.(*mcp.CommandTransport)
+	if !ok {
+		t.Fatalf("transport = %T, want *mcp.CommandTransport", transport)
+	}
+	if cmdTransport.Command.Path != "mcp-server" {
+		t.Fatalf("command path = %q, want mcp-server", cmdTransport.Command.Path)
+	}
+	assert.Equal(t, []string{"mcp-server", "--from-cmd", "--from-args"}, cmdTransport.Command.Args)
+	assert.Equal(t, []string{"ALPHA=1", "BETA=2"}, cmdTransport.Command.Env)
+	if cmdTransport.Command.Dir != "/tmp/mcp-work" {
+		t.Fatalf("command dir = %q, want /tmp/mcp-work", cmdTransport.Command.Dir)
+	}
+}
+
+func TestHTTPClientWithHeadersAddsConfiguredHeaders(t *testing.T) {
+	req, err := http.NewRequest(http.MethodGet, "http://example.test/mcp", nil)
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	rt := staticHeaderRoundTripper{
+		base: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if got := req.Header.Get("Authorization"); got != "Bearer token" {
+				t.Fatalf("Authorization header = %q, want Bearer token", got)
+			}
+			if got := req.Header.Get("X-Test"); got != "yes" {
+				t.Fatalf("X-Test header = %q, want yes", got)
+			}
+			return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody, Header: make(http.Header)}, nil
+		}),
+		headers: map[string]string{"Authorization": "Bearer token", "X-Test": "yes"},
+	}
+	if _, err := rt.RoundTrip(req); err != nil {
+		t.Fatalf("RoundTrip() error = %v", err)
+	}
+	if req.Header.Get("Authorization") != "" {
+		t.Fatalf("RoundTrip mutated original request headers: %#v", req.Header)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func TestFactoryBuild_ACPRejectsRequestTools(t *testing.T) {
+	f := New(map[string]agentconfig.Config{
+		"test-acp": {
+			Type: agentconfig.AgentTypeGenericACP,
+			GenericACP: &agentconfig.ACPConfig{
+				Cmd: []string{"echo"},
+			},
+		},
+	}, mcpregistry.New(nil))
+
+	_, err := f.Build(context.Background(), BuildRequest{
+		AgentID:          "test-acp",
+		WorkingDirectory: t.TempDir(),
+		Tools:            []tool.Tool{requestTool{name: "read_file"}},
+	})
+	if err == nil {
+		t.Fatal("Build() error = nil, want request tools rejection")
+	}
+	if !strings.Contains(err.Error(), "does not support request tools") {
+		t.Fatalf("Build() error = %v, want request tools rejection", err)
+	}
+}
+
+func TestFactoryBuild_PoolRejectsRequestTools(t *testing.T) {
+	f := New(map[string]agentconfig.Config{
+		"pool": {
+			Type: agentconfig.AgentTypePool,
+			PoolConfig: &agentconfig.PoolConfig{
+				Members: []string{"openai"},
+			},
+		},
+		"openai": {
+			Type: agentconfig.AgentTypeOpenAI,
+			OpenAI: &agentconfig.LocalAPIConfig{
+				APIKey: "openai-test-key",
+				Model:  "gpt-5",
+			},
+		},
+	}, mcpregistry.New(nil))
+
+	_, err := f.Build(context.Background(), BuildRequest{
+		AgentID:          "pool",
+		WorkingDirectory: t.TempDir(),
+		Tools:            []tool.Tool{requestTool{name: "read_file"}},
+	})
+	if err == nil {
+		t.Fatal("Build() error = nil, want request tools rejection")
+	}
+	if !strings.Contains(err.Error(), "pool agent does not support request tools") {
+		t.Fatalf("Build() error = %v, want pool request tools rejection", err)
 	}
 }
 
@@ -572,8 +832,14 @@ func TestFactoryBuild_AIStudioProvider(t *testing.T) {
 				APIKey: "aistudio-test-key",
 				Model:  "gemini-2.5-flash",
 			},
+			MCPServers: []string{"workspace"},
 		},
-	}, mcpregistry.New(nil))
+	}, mcpregistry.New(map[string]agentconfig.MCPServerConfig{
+		"workspace": {
+			Type: agentconfig.MCPServerTypeHTTP,
+			URL:  "http://workspace.example/mcp",
+		},
+	}))
 
 	_, err := f.Build(ctx, BuildRequest{
 		AgentID:          "aistudio",
@@ -597,6 +863,9 @@ func TestFactoryBuild_AIStudioProvider(t *testing.T) {
 	}
 	if capturedCfg.Model == nil || capturedCfg.Model.Name() != "remote-aistudio" {
 		t.Fatalf("hosted agent model = %#v, want remote-aistudio", capturedCfg.Model)
+	}
+	if len(capturedCfg.Toolsets) != 1 || capturedCfg.Toolsets[0].Name() != "mcp_tool_set" {
+		t.Fatalf("aistudio hosted toolsets = %#v, want one mcp toolset", capturedCfg.Toolsets)
 	}
 }
 

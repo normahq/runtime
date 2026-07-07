@@ -1,7 +1,6 @@
 // Package runtime groups reusable agent runtime packages extracted from norma.
 //
 // The root package is documentation-only. Functional APIs live in subpackages:
-//   - acpagent for ACP-backed ADK agents and ACP subprocess clients
 //   - agentconfig for provider and MCP configuration schemas
 //   - agentfactory for building runtime agents from validated configuration
 //   - appconfig for loading and validating application config documents
@@ -11,7 +10,7 @@
 //   - sessionstate for canonical runtime session-state keys
 //   - structuredagent for JSON-schema-constrained ADK agent wrappers
 //
-// Use [github.com/normahq/runtime/agentfactory] when applications want the
+// Use [github.com/normahq/runtime/v2/agentfactory] when applications want the
 // complete runtime assembly path. Use the lower-level packages directly when a
 // caller needs one specific runtime capability.
 package runtime

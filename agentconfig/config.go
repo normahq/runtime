@@ -47,9 +47,17 @@ type ACPConfig struct {
 	ExtraArgs []string `json:"extra_args,omitempty" yaml:"extra_args,omitempty" mapstructure:"extra_args" validate:"omitempty,dive,notblank"`
 	// Model selects the runtime model identifier when the backend supports it.
 	Model string `json:"model,omitempty"      yaml:"model,omitempty"      mapstructure:"model"      validate:"omitempty,notblank"`
+	// ReasoningEffort selects the provider reasoning effort when supported.
+	ReasoningEffort string `json:"reasoning_effort,omitempty" yaml:"reasoning_effort,omitempty" mapstructure:"reasoning_effort" validate:"omitempty,oneof=minimal low medium high xhigh"`
 	// Mode selects the runtime session mode when the backend supports it.
 	Mode string `json:"mode,omitempty"       yaml:"mode,omitempty"       mapstructure:"mode"       validate:"omitempty,notblank"`
 }
+
+const (
+	codexACPBridgePackage = "@normahq/codex-acp-bridge@1.6.3"
+	npxCommand            = "npx"
+	npxYesFlag            = "-y"
+)
 
 // LocalAPIConfig is a local API-backed runtime configuration block.
 type LocalAPIConfig struct {
@@ -108,6 +116,8 @@ type ResolvedConfig struct {
 	MCPServers []string
 	// SystemInstructions are the normalized provider-level instructions.
 	SystemInstructions string
+	// ReasoningEffort is the normalized provider reasoning effort.
+	ReasoningEffort string
 
 	// Command is the runtime command argv for ACP-backed agents.
 	Command []string
@@ -397,6 +407,9 @@ func validateAgentBlocks(fl validator.FieldLevel) bool {
 	if cfg.PoolConfig != nil {
 		present++
 	}
+	if present == 0 && strings.TrimSpace(cfg.Type) == AgentTypeCopilotACP {
+		return true
+	}
 	if present != 1 {
 		return false
 	}
@@ -411,7 +424,7 @@ func validateAgentBlocks(fl validator.FieldLevel) bool {
 	case AgentTypeOpenCodeACP:
 		return cfg.OpenCodeACP != nil && len(cfg.OpenCodeACP.Cmd) == 0
 	case AgentTypeCopilotACP:
-		return cfg.CopilotACP != nil && len(cfg.CopilotACP.Cmd) == 0
+		return cfg.CopilotACP == nil || len(cfg.CopilotACP.Cmd) == 0
 	case AgentTypeClaudeCodeACP:
 		return cfg.ClaudeCodeACP != nil && len(cfg.ClaudeCodeACP.Cmd) == 0
 	case AgentTypeOpenAI:
@@ -442,6 +455,9 @@ func explainAgentBlocksError(cfg Config) string {
 		if present {
 			selectedCount++
 		}
+	}
+	if selectedCount == 0 && strings.TrimSpace(cfg.Type) == AgentTypeCopilotACP {
+		return ""
 	}
 	if selectedCount != 1 {
 		return "exactly one type-specific block must be set"
@@ -513,6 +529,9 @@ func explainMCPRequirementsError(cfg MCPServerConfig) string {
 // NormalizeConfig canonicalizes aliases and returns a runtime-ready configuration.
 func NormalizeConfig(cfg Config, executablePath string) (ResolvedConfig, error) {
 	_ = executablePath
+	if err := validateAgentConfigSemantics(cfg); err != nil {
+		return ResolvedConfig{}, err
+	}
 	resolved := ResolvedConfig{
 		MCPServers:         append([]string(nil), cfg.MCPServers...),
 		SystemInstructions: cfg.SystemInstructions,
@@ -524,50 +543,56 @@ func NormalizeConfig(cfg Config, executablePath string) (ResolvedConfig, error) 
 			return ResolvedConfig{}, fmt.Errorf("gemini_acp block is required")
 		}
 		return resolveACPConfig(resolved, AgentTypeGenericACP, ACPConfig{
-			Cmd:       appendGeminiModelFlag([]string{"gemini", "--acp"}, cfg.GeminiACP.Model),
-			ExtraArgs: append([]string(nil), cfg.GeminiACP.ExtraArgs...),
-			Model:     cfg.GeminiACP.Model,
-			Mode:      cfg.GeminiACP.Mode,
+			Cmd:             appendGeminiModelFlag([]string{"gemini", "--acp"}, cfg.GeminiACP.Model),
+			ExtraArgs:       append([]string(nil), cfg.GeminiACP.ExtraArgs...),
+			Model:           cfg.GeminiACP.Model,
+			ReasoningEffort: cfg.GeminiACP.ReasoningEffort,
+			Mode:            cfg.GeminiACP.Mode,
 		}), nil
 	case AgentTypeOpenCodeACP:
 		if cfg.OpenCodeACP == nil {
 			return ResolvedConfig{}, fmt.Errorf("opencode_acp block is required")
 		}
 		return resolveACPConfig(resolved, AgentTypeGenericACP, ACPConfig{
-			Cmd:       []string{"opencode", "acp"},
-			ExtraArgs: append([]string(nil), cfg.OpenCodeACP.ExtraArgs...),
-			Model:     cfg.OpenCodeACP.Model,
-			Mode:      cfg.OpenCodeACP.Mode,
+			Cmd:             []string{"opencode", "acp"},
+			ExtraArgs:       append([]string(nil), cfg.OpenCodeACP.ExtraArgs...),
+			Model:           cfg.OpenCodeACP.Model,
+			ReasoningEffort: cfg.OpenCodeACP.ReasoningEffort,
+			Mode:            cfg.OpenCodeACP.Mode,
 		}), nil
 	case AgentTypeCodexACP:
 		if cfg.CodexACP == nil {
 			return ResolvedConfig{}, fmt.Errorf("codex_acp block is required")
 		}
 		return resolveACPConfig(resolved, AgentTypeGenericACP, ACPConfig{
-			Cmd:       []string{"npx", "-y", "@normahq/codex-acp-bridge@latest"},
-			ExtraArgs: append([]string(nil), cfg.CodexACP.ExtraArgs...),
-			Model:     cfg.CodexACP.Model,
-			Mode:      cfg.CodexACP.Mode,
+			Cmd:             []string{npxCommand, npxYesFlag, codexACPBridgePackage},
+			ExtraArgs:       append([]string(nil), cfg.CodexACP.ExtraArgs...),
+			Model:           cfg.CodexACP.Model,
+			ReasoningEffort: cfg.CodexACP.ReasoningEffort,
+			Mode:            cfg.CodexACP.Mode,
 		}), nil
 	case AgentTypeCopilotACP:
-		if cfg.CopilotACP == nil {
-			return ResolvedConfig{}, fmt.Errorf("copilot_acp block is required")
+		copilotACP := cfg.CopilotACP
+		if copilotACP == nil {
+			copilotACP = &ACPConfig{}
 		}
 		return resolveACPConfig(resolved, AgentTypeGenericACP, ACPConfig{
-			Cmd:       []string{"copilot", "--acp"},
-			ExtraArgs: append([]string(nil), cfg.CopilotACP.ExtraArgs...),
-			Model:     cfg.CopilotACP.Model,
-			Mode:      cfg.CopilotACP.Mode,
+			Cmd:             []string{"copilot", "--acp", "--stdio"},
+			ExtraArgs:       append([]string(nil), copilotACP.ExtraArgs...),
+			Model:           copilotACP.Model,
+			ReasoningEffort: copilotACP.ReasoningEffort,
+			Mode:            copilotACP.Mode,
 		}), nil
 	case AgentTypeClaudeCodeACP:
 		if cfg.ClaudeCodeACP == nil {
 			return ResolvedConfig{}, fmt.Errorf("claude_code_acp block is required")
 		}
 		return resolveACPConfig(resolved, AgentTypeGenericACP, ACPConfig{
-			Cmd:       []string{"npx", "-y", "@zed-industries/claude-code-acp@latest"},
-			ExtraArgs: append([]string(nil), cfg.ClaudeCodeACP.ExtraArgs...),
-			Model:     cfg.ClaudeCodeACP.Model,
-			Mode:      cfg.ClaudeCodeACP.Mode,
+			Cmd:             []string{"npx", "-y", "@zed-industries/claude-code-acp@latest"},
+			ExtraArgs:       append([]string(nil), cfg.ClaudeCodeACP.ExtraArgs...),
+			Model:           cfg.ClaudeCodeACP.Model,
+			ReasoningEffort: cfg.ClaudeCodeACP.ReasoningEffort,
+			Mode:            cfg.ClaudeCodeACP.Mode,
 		}), nil
 	case AgentTypeGenericACP:
 		if cfg.GenericACP == nil {
@@ -633,6 +658,7 @@ func NormalizeACPConfigs(cfgs map[string]Config, executablePath string) (map[str
 func resolveACPConfig(base ResolvedConfig, resolvedType string, spec ACPConfig) ResolvedConfig {
 	base.Type = resolvedType
 	base.Model = spec.Model
+	base.ReasoningEffort = strings.TrimSpace(spec.ReasoningEffort)
 	base.Mode = spec.Mode
 	base.Command = resolveTemplatedArgs(spec.Cmd, spec.Model)
 	if len(spec.ExtraArgs) > 0 {
@@ -690,11 +716,17 @@ func (c Config) selectedLocalAPIBlock() (*LocalAPIConfig, bool) {
 }
 
 func validateAgentConfigSemantics(cfg Config) error {
-	switch strings.TrimSpace(cfg.Type) {
-	case AgentTypeOpenAI, AgentTypeAIStudio:
-		if len(cfg.MCPServers) > 0 {
-			return fmt.Errorf("mcp_servers is not supported for type %s", strings.TrimSpace(cfg.Type))
-		}
+	agentType := strings.TrimSpace(cfg.Type)
+	var reasoningEffort string
+	if spec, ok := cfg.selectedACPBlock(); ok {
+		reasoningEffort = strings.TrimSpace(spec.ReasoningEffort)
+	}
+
+	if reasoningEffort == "" {
+		return nil
+	}
+	if agentType != AgentTypeCodexACP {
+		return fmt.Errorf("reasoning_effort is only supported for type %s", AgentTypeCodexACP)
 	}
 
 	return nil

@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"iter"
 
-	"github.com/normahq/runtime/agentconfig"
-	"google.golang.org/adk/agent"
-	"google.golang.org/adk/session"
+	"github.com/normahq/runtime/v2/agentconfig"
+	"google.golang.org/adk/v2/agent"
+	"google.golang.org/adk/v2/session"
 )
 
 type exampleCreator struct{}
