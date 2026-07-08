@@ -54,7 +54,7 @@ type ACPConfig struct {
 }
 
 const (
-	codexACPBridgePackage = "@normahq/codex-acp-bridge@1.6.3"
+	codexACPBridgePackage = "@normahq/codex-acp-bridge@1.6.4"
 	npxCommand            = "npx"
 	npxYesFlag            = "-y"
 )
