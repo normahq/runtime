@@ -53,6 +53,9 @@ func main() {
 		"providers": map[string]any{
 			"codex": map[string]any{
 				"type": "codex_acp",
+				"codex_acp": map[string]any{
+					"bridge_version": "latest",
+				},
 			},
 		},
 	}
@@ -82,6 +85,9 @@ func main() {
 	providers := map[string]agentconfig.Config{
 		"codex": {
 			Type: agentconfig.AgentTypeCodexACP,
+			CodexACP: &agentconfig.ACPConfig{
+				BridgeVersion: "latest",
+			},
 		},
 	}
 
@@ -95,6 +101,9 @@ func main() {
 	}
 }
 ```
+
+For `codex_acp`, `bridge_version` accepts an npm version or dist-tag for
+`@normahq/codex-acp-bridge`; empty defaults to `latest`.
 
 Direct ACP agent construction lives in `github.com/normahq/go-adk-acpagent/v2`.
 Runtime v2 uses that package internally through `agentfactory`.

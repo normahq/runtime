@@ -51,12 +51,15 @@ type ACPConfig struct {
 	ReasoningEffort string `json:"reasoning_effort,omitempty" yaml:"reasoning_effort,omitempty" mapstructure:"reasoning_effort" validate:"omitempty,oneof=minimal low medium high xhigh"`
 	// Mode selects the runtime session mode when the backend supports it.
 	Mode string `json:"mode,omitempty"       yaml:"mode,omitempty"       mapstructure:"mode"       validate:"omitempty,notblank"`
+	// BridgeVersion selects the Codex ACP bridge npm version or dist-tag.
+	BridgeVersion string `json:"bridge_version,omitempty" yaml:"bridge_version,omitempty" mapstructure:"bridge_version" validate:"omitempty,notblank"`
 }
 
 const (
-	codexACPBridgePackage = "@normahq/codex-acp-bridge@1.6.4"
-	npxCommand            = "npx"
-	npxYesFlag            = "-y"
+	codexACPBridgePackageName    = "@normahq/codex-acp-bridge"
+	defaultCodexACPBridgeVersion = "latest"
+	npxCommand                   = "npx"
+	npxYesFlag                   = "-y"
 )
 
 // LocalAPIConfig is a local API-backed runtime configuration block.
@@ -565,7 +568,7 @@ func NormalizeConfig(cfg Config, executablePath string) (ResolvedConfig, error) 
 			return ResolvedConfig{}, fmt.Errorf("codex_acp block is required")
 		}
 		return resolveACPConfig(resolved, AgentTypeGenericACP, ACPConfig{
-			Cmd:             []string{npxCommand, npxYesFlag, codexACPBridgePackage},
+			Cmd:             []string{npxCommand, npxYesFlag, codexACPBridgePackage(cfg.CodexACP.BridgeVersion)},
 			ExtraArgs:       append([]string(nil), cfg.CodexACP.ExtraArgs...),
 			Model:           cfg.CodexACP.Model,
 			ReasoningEffort: cfg.CodexACP.ReasoningEffort,
@@ -665,6 +668,14 @@ func resolveACPConfig(base ResolvedConfig, resolvedType string, spec ACPConfig) 
 		base.Command = append(base.Command, resolveTemplatedArgs(spec.ExtraArgs, spec.Model)...)
 	}
 	return base
+}
+
+func codexACPBridgePackage(version string) string {
+	version = strings.TrimPrefix(strings.TrimSpace(version), "@")
+	if version == "" {
+		version = defaultCodexACPBridgeVersion
+	}
+	return codexACPBridgePackageName + "@" + version
 }
 
 func appendGeminiModelFlag(cmd []string, model string) []string {
