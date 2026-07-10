@@ -49,12 +49,12 @@ func TestConfigValidate(t *testing.T) {
 			wantErr: "cmd is required for type generic_acp",
 		},
 		{
-			name: "alias_forbids_cmd",
+			name: "gemini_acp_deprecated",
 			cfg: Config{
 				Type:      AgentTypeGeminiACP,
-				GeminiACP: &ACPConfig{Cmd: []string{"gemini", "--acp"}},
+				GeminiACP: &ACPConfig{},
 			},
-			wantErr: "cmd must be omitted for type gemini_acp",
+			wantErr: "gemini_acp is deprecated and no longer supported",
 		},
 		{
 			name: "claude_code_alias_forbids_cmd",
@@ -115,13 +115,7 @@ func TestConfigValidate(t *testing.T) {
 			},
 		},
 		{
-			name: "valid_copilot_alias_default",
-			cfg: Config{
-				Type: AgentTypeCopilotACP,
-			},
-		},
-		{
-			name: "reasoning_effort_rejected_for_generic_acp",
+			name: "valid_generic_acp_reasoning_effort",
 			cfg: Config{
 				Type: AgentTypeGenericACP,
 				GenericACP: &ACPConfig{
@@ -129,7 +123,12 @@ func TestConfigValidate(t *testing.T) {
 					ReasoningEffort: "high",
 				},
 			},
-			wantErr: "reasoning_effort is only supported for type codex_acp",
+		},
+		{
+			name: "valid_copilot_alias_default",
+			cfg: Config{
+				Type: AgentTypeCopilotACP,
+			},
 		},
 		{
 			name: "valid_aistudio",
@@ -176,7 +175,7 @@ func TestNormalizeConfig(t *testing.T) {
 		wantErr string
 	}{
 		{
-			name: "gemini_alias",
+			name: "gemini_acp_deprecated",
 			cfg: Config{
 				Type: AgentTypeGeminiACP,
 				GeminiACP: &ACPConfig{
@@ -185,13 +184,8 @@ func TestNormalizeConfig(t *testing.T) {
 					ExtraArgs: []string{"--trace"},
 				},
 			},
-			exec: execPath,
-			want: ResolvedConfig{
-				Type:    AgentTypeGenericACP,
-				Command: []string{"gemini", "--acp", "--model", "gemini-3-flash-preview", "--trace"},
-				Model:   "gemini-3-flash-preview",
-				Mode:    "code",
-			},
+			exec:    execPath,
+			wantErr: "gemini_acp is deprecated and no longer supported",
 		},
 		{
 			name: "opencode_alias",
@@ -391,21 +385,21 @@ func TestNormalizeConfig_DoesNotMutateSchemaConfig(t *testing.T) {
 	}
 }
 
-func TestNormalizeConfig_RejectsReasoningEffortForUnsupportedTypes(t *testing.T) {
+func TestNormalizeConfig_AllowsReasoningEffortForGenericACP(t *testing.T) {
 	t.Parallel()
 
-	_, err := NormalizeConfig(Config{
+	got, err := NormalizeConfig(Config{
 		Type: AgentTypeGenericACP,
 		GenericACP: &ACPConfig{
 			Cmd:             []string{"custom-acp"},
 			ReasoningEffort: "high",
 		},
 	}, "/tmp/norma")
-	if err == nil {
-		t.Fatal("NormalizeConfig() error = nil, want unsupported reasoning_effort error")
+	if err != nil {
+		t.Fatalf("NormalizeConfig() error = %v", err)
 	}
-	if got := err.Error(); got != "reasoning_effort is only supported for type codex_acp" {
-		t.Fatalf("NormalizeConfig() error = %q, want unsupported reasoning_effort error", got)
+	if got.ReasoningEffort != "high" {
+		t.Fatalf("NormalizeConfig().ReasoningEffort = %q, want high", got.ReasoningEffort)
 	}
 }
 
@@ -416,8 +410,8 @@ func TestNormalizeConfigs(t *testing.T) {
 
 	got, err := NormalizeConfigs(map[string]Config{
 		"plan": {
-			Type:      AgentTypeGeminiACP,
-			GeminiACP: &ACPConfig{Model: "gemini-3-flash-preview"},
+			Type:       AgentTypeGenericACP,
+			GenericACP: &ACPConfig{Cmd: []string{"custom-acp", "--plan"}},
 		},
 		"do": {
 			Type:        AgentTypeOpenCodeACP,
@@ -444,8 +438,8 @@ func TestNormalizeConfigs(t *testing.T) {
 	if planCfg.Type != AgentTypeGenericACP {
 		t.Fatalf("plan type = %q, want %q", planCfg.Type, AgentTypeGenericACP)
 	}
-	if len(planCfg.Command) == 0 || planCfg.Command[0] != "gemini" {
-		t.Fatalf("plan command = %v, want gemini ACP command", planCfg.Command)
+	if len(planCfg.Command) < 2 || planCfg.Command[0] != "custom-acp" || planCfg.Command[1] != "--plan" {
+		t.Fatalf("plan command = %v, want custom-acp --plan", planCfg.Command)
 	}
 
 	doCfg := got["do"]

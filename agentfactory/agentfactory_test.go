@@ -166,7 +166,7 @@ func TestFactoryBuild_NormalizesTemplatedACPCommand(t *testing.T) {
 	assert.Equal(t, want, capturedCommand)
 }
 
-func TestFactoryBuild_PropagatesCodexReasoningEffort(t *testing.T) {
+func TestFactoryBuild_PropagatesACPReasoningEffort(t *testing.T) {
 	origNewACPAgent := newACPAgent
 	t.Cleanup(func() {
 		newACPAgent = origNewACPAgent
@@ -179,17 +179,17 @@ func TestFactoryBuild_PropagatesCodexReasoningEffort(t *testing.T) {
 	}
 
 	agents := map[string]agentconfig.Config{
-		"codex": {
-			Type: agentconfig.AgentTypeCodexACP,
-			CodexACP: &agentconfig.ACPConfig{
-				Model:           "gpt-5-codex",
+		"acp": {
+			Type: agentconfig.AgentTypeGenericACP,
+			GenericACP: &agentconfig.ACPConfig{
+				Cmd:             helperACPCommand(t),
 				ReasoningEffort: "medium",
 			},
 		},
 	}
 	f := New(agents, mcpregistry.New(nil))
 
-	_, err := f.Build(context.Background(), BuildRequest{AgentID: "codex", WorkingDirectory: t.TempDir()})
+	_, err := f.Build(context.Background(), BuildRequest{AgentID: "acp", WorkingDirectory: t.TempDir()})
 	if err != nil {
 		t.Fatalf("Build() error = %v", err)
 	}
@@ -209,10 +209,10 @@ func TestFactoryBuild_BuildRequestReasoningEffortOverridesProvider(t *testing.T)
 	}
 
 	agents := map[string]agentconfig.Config{
-		"codex": {
-			Type: agentconfig.AgentTypeCodexACP,
-			CodexACP: &agentconfig.ACPConfig{
-				Model:           "gpt-5-codex",
+		"acp": {
+			Type: agentconfig.AgentTypeGenericACP,
+			GenericACP: &agentconfig.ACPConfig{
+				Cmd:             helperACPCommand(t),
 				ReasoningEffort: "low",
 			},
 		},
@@ -220,7 +220,7 @@ func TestFactoryBuild_BuildRequestReasoningEffortOverridesProvider(t *testing.T)
 	f := New(agents, mcpregistry.New(nil))
 
 	_, err := f.Build(context.Background(), BuildRequest{
-		AgentID:          "codex",
+		AgentID:          "acp",
 		WorkingDirectory: t.TempDir(),
 		ReasoningEffort:  "high",
 	})
@@ -230,7 +230,18 @@ func TestFactoryBuild_BuildRequestReasoningEffortOverridesProvider(t *testing.T)
 	assert.Equal(t, "high", capturedReasoningEffort)
 }
 
-func TestFactoryBuild_RejectsReasoningEffortOverrideForUnsupportedType(t *testing.T) {
+func TestFactoryBuild_AllowsReasoningEffortOverrideForGenericACP(t *testing.T) {
+	origNewACPAgent := newACPAgent
+	t.Cleanup(func() {
+		newACPAgent = origNewACPAgent
+	})
+
+	var capturedReasoningEffort string
+	newACPAgent = func(cfg acpagent.Config) (agent.Agent, error) {
+		capturedReasoningEffort = cfg.ReasoningEffort
+		return nil, nil
+	}
+
 	agents := map[string]agentconfig.Config{
 		"test-acp": {
 			Type: agentconfig.AgentTypeGenericACP,
@@ -246,10 +257,10 @@ func TestFactoryBuild_RejectsReasoningEffortOverrideForUnsupportedType(t *testin
 		WorkingDirectory: t.TempDir(),
 		ReasoningEffort:  "high",
 	})
-	if err == nil {
-		t.Fatal("Build() error = nil, want unsupported reasoning_effort error")
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
 	}
-	assert.Contains(t, err.Error(), "reasoning_effort is only supported for type codex_acp")
+	assert.Equal(t, "high", capturedReasoningEffort)
 }
 
 func TestACPConstructor_PassesConfiguredSlogLogger(t *testing.T) {

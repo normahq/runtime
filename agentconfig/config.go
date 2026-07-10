@@ -250,7 +250,7 @@ const (
 	// AgentTypeGenericACP is the type for custom ACP CLI executables.
 	AgentTypeGenericACP = "generic_acp"
 
-	// AgentTypeGeminiACP is the alias for Gemini CLI ACP mode.
+	// AgentTypeGeminiACP is a deprecated alias for Gemini CLI ACP mode.
 	AgentTypeGeminiACP = "gemini_acp"
 	// AgentTypeCodexACP is the alias for Codex ACP bridge mode.
 	AgentTypeCodexACP = "codex_acp"
@@ -272,7 +272,6 @@ const (
 func SupportedAgentTypes() []string {
 	return []string{
 		AgentTypeGenericACP,
-		AgentTypeGeminiACP,
 		AgentTypeCodexACP,
 		AgentTypeOpenCodeACP,
 		AgentTypeCopilotACP,
@@ -301,7 +300,7 @@ func IsPoolType(agentType string) bool {
 // IsACPType reports whether an agent type uses the ACP runtime.
 func IsACPType(agentType string) bool {
 	switch strings.TrimSpace(agentType) {
-	case AgentTypeGenericACP, AgentTypeGeminiACP, AgentTypeOpenCodeACP, AgentTypeCodexACP, AgentTypeCopilotACP, AgentTypeClaudeCodeACP:
+	case AgentTypeGenericACP, AgentTypeOpenCodeACP, AgentTypeCodexACP, AgentTypeCopilotACP, AgentTypeClaudeCodeACP:
 		return true
 	default:
 		return false
@@ -727,17 +726,8 @@ func (c Config) selectedLocalAPIBlock() (*LocalAPIConfig, bool) {
 }
 
 func validateAgentConfigSemantics(cfg Config) error {
-	agentType := strings.TrimSpace(cfg.Type)
-	var reasoningEffort string
-	if spec, ok := cfg.selectedACPBlock(); ok {
-		reasoningEffort = strings.TrimSpace(spec.ReasoningEffort)
-	}
-
-	if reasoningEffort == "" {
-		return nil
-	}
-	if agentType != AgentTypeCodexACP {
-		return fmt.Errorf("reasoning_effort is only supported for type %s", AgentTypeCodexACP)
+	if strings.TrimSpace(cfg.Type) == AgentTypeGeminiACP {
+		return fmt.Errorf("%s is deprecated and no longer supported", AgentTypeGeminiACP)
 	}
 
 	return nil

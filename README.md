@@ -105,6 +105,15 @@ func main() {
 For `codex_acp`, `bridge_version` accepts an npm version or dist-tag for
 `@normahq/codex-acp-bridge`; empty defaults to `latest`.
 
+`reasoning_effort` is a generic ACP config field and may be set on any ACP-backed
+provider config (`generic_acp`, `codex_acp`, `opencode_acp`, `copilot_acp`,
+`claude_code_acp`). Runtime forwards it to the ACP agent config and leaves
+backend-specific handling to the concrete ACP implementation.
+
+`gemini_acp` is deprecated and no longer supported. Use another supported ACP
+provider type, or configure Gemini explicitly through `generic_acp` if you need
+a custom ACP command path.
+
 Direct ACP agent construction lives in `github.com/normahq/go-adk-acpagent/v2`.
 Runtime v2 uses that package internally through `agentfactory`.
 

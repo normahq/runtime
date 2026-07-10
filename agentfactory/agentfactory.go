@@ -538,15 +538,13 @@ func effectiveGlobalInstruction(req BuildRequest) string {
 }
 
 func effectiveReasoningEffort(req BuildRequest, cfg agentconfig.ResolvedConfig, schemaType string) (string, error) {
+	_ = schemaType
 	override := strings.TrimSpace(req.ReasoningEffort)
 	if override == "" {
 		override = strings.TrimSpace(cfg.ReasoningEffort)
 	}
 	if override == "" {
 		return "", nil
-	}
-	if strings.TrimSpace(schemaType) != agentconfig.AgentTypeCodexACP {
-		return "", fmt.Errorf("reasoning_effort is only supported for type %s", agentconfig.AgentTypeCodexACP)
 	}
 	return override, nil
 }
