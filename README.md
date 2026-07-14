@@ -107,8 +107,11 @@ For `codex_acp`, `bridge_version` accepts an npm version or dist-tag for
 
 `reasoning_effort` is a generic ACP config field and may be set on any ACP-backed
 provider config (`generic_acp`, `codex_acp`, `opencode_acp`, `copilot_acp`,
-`claude_code_acp`). Runtime forwards it to the ACP agent config and leaves
+`claude_code_acp`, `grok_acp`). Runtime forwards it to the ACP agent config and leaves
 backend-specific handling to the concrete ACP implementation.
+
+`grok_acp` runs Grok Build through `grok agent stdio` by default. The Grok CLI
+must be authenticated with `grok login` or `XAI_API_KEY`.
 
 `gemini_acp` is deprecated and no longer supported. Use another supported ACP
 provider type, or configure Gemini explicitly through `generic_acp` if you need

@@ -72,6 +72,13 @@ func TestConfigValidate(t *testing.T) {
 			},
 		},
 		{
+			name: "grok_alias_accepts_cmd",
+			cfg: Config{
+				Type:    AgentTypeGrokACP,
+				GrokACP: &ACPConfig{Cmd: []string{"grok", "agent", "stdio"}},
+			},
+		},
+		{
 			name: "cmd_item_must_be_nonempty",
 			cfg: Config{
 				Type: AgentTypeGenericACP,
@@ -281,6 +288,26 @@ func TestNormalizeConfig(t *testing.T) {
 				Command: []string{"npx", "-y", "@zed-industries/claude-code-acp@latest", "--trace"},
 				Model:   "claude-sonnet-4-20250514",
 				Mode:    "code",
+			},
+		},
+		{
+			name: "grok_alias",
+			cfg: Config{
+				Type: AgentTypeGrokACP,
+				GrokACP: &ACPConfig{
+					Model:           "grok-4.5",
+					ReasoningEffort: "high",
+					Mode:            "plan",
+					ExtraArgs:       []string{"--trace"},
+				},
+			},
+			exec: execPath,
+			want: ResolvedConfig{
+				Type:            AgentTypeGenericACP,
+				Command:         []string{"grok", "agent", "stdio", "--trace"},
+				Model:           "grok-4.5",
+				Mode:            "plan",
+				ReasoningEffort: "high",
 			},
 		},
 		{

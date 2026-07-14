@@ -85,7 +85,7 @@ type PoolConfig struct {
 //	  ...type-specific config...
 type Config struct {
 	// Type selects the runtime backend implementation.
-	Type string `json:"type"                           yaml:"type"                           mapstructure:"type"                validate:"required,oneof=generic_acp gemini_acp codex_acp opencode_acp copilot_acp claude_code_acp openai aistudio pool,agent_blocks"`
+	Type string `json:"type"                           yaml:"type"                           mapstructure:"type"                validate:"required,oneof=generic_acp gemini_acp codex_acp opencode_acp copilot_acp claude_code_acp grok_acp openai aistudio pool,agent_blocks"`
 	// MCPServers lists MCP server IDs resolved by higher-level registries.
 	MCPServers []string `json:"mcp_servers,omitempty"          yaml:"mcp_servers,omitempty"          mapstructure:"mcp_servers"         validate:"omitempty,dive,notblank"`
 	// SystemInstructions defines provider-level instructions applied by default.
@@ -103,6 +103,8 @@ type Config struct {
 	CopilotACP *ACPConfig `json:"copilot_acp,omitempty"     yaml:"copilot_acp,omitempty"     mapstructure:"copilot_acp"`
 	// ClaudeCodeACP configures the Claude Code ACP alias.
 	ClaudeCodeACP *ACPConfig `json:"claude_code_acp,omitempty" yaml:"claude_code_acp,omitempty" mapstructure:"claude_code_acp"`
+	// GrokACP configures the Grok Build ACP alias.
+	GrokACP *ACPConfig `json:"grok_acp,omitempty"        yaml:"grok_acp,omitempty"        mapstructure:"grok_acp"`
 	// OpenAI configures a local OpenAI-backed hosted agent.
 	OpenAI *LocalAPIConfig `json:"openai,omitempty"         yaml:"openai,omitempty"          mapstructure:"openai"`
 	// AIStudio configures a local Google AI Studio-backed hosted agent.
@@ -260,6 +262,8 @@ const (
 	AgentTypeCopilotACP = "copilot_acp"
 	// AgentTypeClaudeCodeACP is the alias for Claude Code ACP mode.
 	AgentTypeClaudeCodeACP = "claude_code_acp"
+	// AgentTypeGrokACP is the alias for Grok Build ACP mode.
+	AgentTypeGrokACP = "grok_acp"
 	// AgentTypeOpenAI is the type for local OpenAI-backed providers.
 	AgentTypeOpenAI = "openai"
 	// AgentTypeAIStudio is the type for local Google AI Studio-backed providers.
@@ -276,6 +280,7 @@ func SupportedAgentTypes() []string {
 		AgentTypeOpenCodeACP,
 		AgentTypeCopilotACP,
 		AgentTypeClaudeCodeACP,
+		AgentTypeGrokACP,
 		AgentTypeOpenAI,
 		AgentTypeAIStudio,
 		AgentTypePool,
@@ -300,7 +305,7 @@ func IsPoolType(agentType string) bool {
 // IsACPType reports whether an agent type uses the ACP runtime.
 func IsACPType(agentType string) bool {
 	switch strings.TrimSpace(agentType) {
-	case AgentTypeGenericACP, AgentTypeOpenCodeACP, AgentTypeCodexACP, AgentTypeCopilotACP, AgentTypeClaudeCodeACP:
+	case AgentTypeGenericACP, AgentTypeOpenCodeACP, AgentTypeCodexACP, AgentTypeCopilotACP, AgentTypeClaudeCodeACP, AgentTypeGrokACP:
 		return true
 	default:
 		return false
@@ -400,6 +405,9 @@ func validateAgentBlocks(fl validator.FieldLevel) bool {
 	if cfg.ClaudeCodeACP != nil {
 		present++
 	}
+	if cfg.GrokACP != nil {
+		present++
+	}
 	if cfg.OpenAI != nil {
 		present++
 	}
@@ -429,6 +437,8 @@ func validateAgentBlocks(fl validator.FieldLevel) bool {
 		return cfg.CopilotACP != nil
 	case AgentTypeClaudeCodeACP:
 		return cfg.ClaudeCodeACP != nil
+	case AgentTypeGrokACP:
+		return cfg.GrokACP != nil
 	case AgentTypeOpenAI:
 		return cfg.OpenAI != nil
 	case AgentTypeAIStudio:
@@ -448,6 +458,7 @@ func explainAgentBlocksError(cfg Config) string {
 		AgentTypeOpenCodeACP:   cfg.OpenCodeACP != nil,
 		AgentTypeCopilotACP:    cfg.CopilotACP != nil,
 		AgentTypeClaudeCodeACP: cfg.ClaudeCodeACP != nil,
+		AgentTypeGrokACP:       cfg.GrokACP != nil,
 		AgentTypeOpenAI:        cfg.OpenAI != nil,
 		AgentTypeAIStudio:      cfg.AIStudio != nil,
 		AgentTypePool:          cfg.PoolConfig != nil,
@@ -489,6 +500,7 @@ func explainAgentBlocksError(cfg Config) string {
 	case AgentTypeOpenCodeACP:
 	case AgentTypeCopilotACP:
 	case AgentTypeClaudeCodeACP:
+	case AgentTypeGrokACP:
 	case AgentTypeOpenAI:
 		if cfg.OpenAI == nil {
 			return fmt.Sprintf("openai block is required for type %s", AgentTypeOpenAI)
@@ -583,6 +595,17 @@ func NormalizeConfig(cfg Config, executablePath string) (ResolvedConfig, error) 
 			Model:           cfg.ClaudeCodeACP.Model,
 			ReasoningEffort: cfg.ClaudeCodeACP.ReasoningEffort,
 			Mode:            cfg.ClaudeCodeACP.Mode,
+		}), nil
+	case AgentTypeGrokACP:
+		if cfg.GrokACP == nil {
+			return ResolvedConfig{}, fmt.Errorf("grok_acp block is required")
+		}
+		return resolveACPConfig(resolved, AgentTypeGenericACP, ACPConfig{
+			Cmd:             commandOrDefault(cfg.GrokACP.Cmd, []string{"grok", "agent", "stdio"}),
+			ExtraArgs:       append([]string(nil), cfg.GrokACP.ExtraArgs...),
+			Model:           cfg.GrokACP.Model,
+			ReasoningEffort: cfg.GrokACP.ReasoningEffort,
+			Mode:            cfg.GrokACP.Mode,
 		}), nil
 	case AgentTypeGenericACP:
 		if cfg.GenericACP == nil {
@@ -704,6 +727,8 @@ func (c Config) selectedACPBlock() (*ACPConfig, bool) {
 		return c.CopilotACP, c.CopilotACP != nil
 	case AgentTypeClaudeCodeACP:
 		return c.ClaudeCodeACP, c.ClaudeCodeACP != nil
+	case AgentTypeGrokACP:
+		return c.GrokACP, c.GrokACP != nil
 	default:
 		return nil, false
 	}

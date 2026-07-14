@@ -14,6 +14,7 @@ func TestNormalizeConfig_ACPAliasCommandOverride(t *testing.T) {
 		{"claude", Config{Type: AgentTypeClaudeCodeACP, ClaudeCodeACP: &ACPConfig{Cmd: []string{"custom-claude"}, ExtraArgs: []string{"--stdio"}, Model: "model", ReasoningEffort: "high", Mode: "review"}}},
 		{"opencode", Config{Type: AgentTypeOpenCodeACP, OpenCodeACP: &ACPConfig{Cmd: []string{"custom-opencode"}, ExtraArgs: []string{"--stdio"}, Model: "model", ReasoningEffort: "high", Mode: "review"}}},
 		{"copilot", Config{Type: AgentTypeCopilotACP, CopilotACP: &ACPConfig{Cmd: []string{"custom-copilot"}, ExtraArgs: []string{"--stdio"}, Model: "model", ReasoningEffort: "high", Mode: "review"}}},
+		{"grok", Config{Type: AgentTypeGrokACP, GrokACP: &ACPConfig{Cmd: []string{"custom-grok"}, ExtraArgs: []string{"--stdio"}, Model: "model", ReasoningEffort: "high", Mode: "review"}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
