@@ -65,6 +65,14 @@ func TestConfigValidate(t *testing.T) {
 			wantErr: "cmd must be omitted for type claude_code_acp",
 		},
 		{
+			name: "claude_alias_forbids_cmd",
+			cfg: Config{
+				Type:          AgentTypeClaudeACP,
+				ClaudeCodeACP: &ACPConfig{Cmd: []string{"npx", "-y", "@zed-industries/claude-code-acp@latest"}},
+			},
+			wantErr: "cmd must be omitted for type claude_acp",
+		},
+		{
 			name: "cmd_item_must_be_nonempty",
 			cfg: Config{
 				Type: AgentTypeGenericACP,
@@ -277,6 +285,24 @@ func TestNormalizeConfig(t *testing.T) {
 			},
 		},
 		{
+			name: "claude_alias",
+			cfg: Config{
+				Type: AgentTypeClaudeACP,
+				ClaudeCodeACP: &ACPConfig{
+					Model:     "claude-sonnet-4-20250514",
+					Mode:      "code",
+					ExtraArgs: []string{"--trace"},
+				},
+			},
+			exec: execPath,
+			want: ResolvedConfig{
+				Type:    AgentTypeGenericACP,
+				Command: []string{"npx", "-y", "@zed-industries/claude-code-acp@latest", "--trace"},
+				Model:   "claude-sonnet-4-20250514",
+				Mode:    "code",
+			},
+		},
+		{
 			name: "generic_with_template",
 			cfg: Config{
 				Type: AgentTypeGenericACP,
@@ -400,6 +426,14 @@ func TestNormalizeConfig_AllowsReasoningEffortForGenericACP(t *testing.T) {
 	}
 	if got.ReasoningEffort != "high" {
 		t.Fatalf("NormalizeConfig().ReasoningEffort = %q, want high", got.ReasoningEffort)
+	}
+}
+
+func TestIsACPType_ClaudeAlias(t *testing.T) {
+	t.Parallel()
+
+	if !IsACPType(AgentTypeClaudeACP) {
+		t.Fatal("IsACPType(claude_acp) = false, want true")
 	}
 }
 

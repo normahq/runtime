@@ -85,7 +85,7 @@ type PoolConfig struct {
 //	  ...type-specific config...
 type Config struct {
 	// Type selects the runtime backend implementation.
-	Type string `json:"type"                           yaml:"type"                           mapstructure:"type"                validate:"required,oneof=generic_acp gemini_acp codex_acp opencode_acp copilot_acp claude_code_acp openai aistudio pool,agent_blocks"`
+	Type string `json:"type"                           yaml:"type"                           mapstructure:"type"                validate:"required,oneof=generic_acp gemini_acp codex_acp opencode_acp copilot_acp claude_code_acp claude_acp openai aistudio pool,agent_blocks"`
 	// MCPServers lists MCP server IDs resolved by higher-level registries.
 	MCPServers []string `json:"mcp_servers,omitempty"          yaml:"mcp_servers,omitempty"          mapstructure:"mcp_servers"         validate:"omitempty,dive,notblank"`
 	// SystemInstructions defines provider-level instructions applied by default.
@@ -260,6 +260,8 @@ const (
 	AgentTypeCopilotACP = "copilot_acp"
 	// AgentTypeClaudeCodeACP is the alias for Claude Code ACP mode.
 	AgentTypeClaudeCodeACP = "claude_code_acp"
+	// AgentTypeClaudeACP is a compatibility alias for Claude Code ACP mode.
+	AgentTypeClaudeACP = "claude_acp"
 	// AgentTypeOpenAI is the type for local OpenAI-backed providers.
 	AgentTypeOpenAI = "openai"
 	// AgentTypeAIStudio is the type for local Google AI Studio-backed providers.
@@ -276,6 +278,7 @@ func SupportedAgentTypes() []string {
 		AgentTypeOpenCodeACP,
 		AgentTypeCopilotACP,
 		AgentTypeClaudeCodeACP,
+		AgentTypeClaudeACP,
 		AgentTypeOpenAI,
 		AgentTypeAIStudio,
 		AgentTypePool,
@@ -294,13 +297,13 @@ func IsValidAgentType(agentType string) bool {
 
 // IsPoolType reports whether an agent type is a pool.
 func IsPoolType(agentType string) bool {
-	return strings.TrimSpace(agentType) == AgentTypePool
+	return canonicalAgentType(agentType) == AgentTypePool
 }
 
 // IsACPType reports whether an agent type uses the ACP runtime.
 func IsACPType(agentType string) bool {
-	switch strings.TrimSpace(agentType) {
-	case AgentTypeGenericACP, AgentTypeOpenCodeACP, AgentTypeCodexACP, AgentTypeCopilotACP, AgentTypeClaudeCodeACP:
+	switch canonicalAgentType(agentType) {
+	case AgentTypeGenericACP, AgentTypeOpenCodeACP, AgentTypeCodexACP, AgentTypeCopilotACP, AgentTypeClaudeCodeACP, AgentTypeClaudeACP:
 		return true
 	default:
 		return false
@@ -416,7 +419,7 @@ func validateAgentBlocks(fl validator.FieldLevel) bool {
 		return false
 	}
 
-	switch strings.TrimSpace(cfg.Type) {
+	switch canonicalAgentType(cfg.Type) {
 	case AgentTypeGenericACP:
 		return cfg.GenericACP != nil && len(cfg.GenericACP.Cmd) > 0
 	case AgentTypeGeminiACP:
@@ -427,7 +430,7 @@ func validateAgentBlocks(fl validator.FieldLevel) bool {
 		return cfg.OpenCodeACP != nil && len(cfg.OpenCodeACP.Cmd) == 0
 	case AgentTypeCopilotACP:
 		return cfg.CopilotACP == nil || len(cfg.CopilotACP.Cmd) == 0
-	case AgentTypeClaudeCodeACP:
+	case AgentTypeClaudeCodeACP, AgentTypeClaudeACP:
 		return cfg.ClaudeCodeACP != nil && len(cfg.ClaudeCodeACP.Cmd) == 0
 	case AgentTypeOpenAI:
 		return cfg.OpenAI != nil
@@ -465,49 +468,50 @@ func explainAgentBlocksError(cfg Config) string {
 		return "exactly one type-specific block must be set"
 	}
 
-	typeName := strings.TrimSpace(cfg.Type)
+	rawTypeName := strings.TrimSpace(cfg.Type)
+	typeName := canonicalAgentType(cfg.Type)
 	if present, ok := typeBlocks[typeName]; ok && !present {
-		return fmt.Sprintf("%s block is required for type %s", typeName, typeName)
+		return fmt.Sprintf("%s block is required for type %s", typeName, rawTypeName)
 	}
 	for blockType, present := range typeBlocks {
 		if !present || blockType == typeName {
 			continue
 		}
-		return fmt.Sprintf("%s block must be omitted when type is %s", blockType, typeName)
+		return fmt.Sprintf("%s block must be omitted when type is %s", blockType, rawTypeName)
 	}
 
 	switch typeName {
 	case AgentTypeGenericACP:
 		if cfg.GenericACP == nil || len(cfg.GenericACP.Cmd) == 0 {
-			return fmt.Sprintf("cmd is required for type %s", AgentTypeGenericACP)
+			return fmt.Sprintf("cmd is required for type %s", rawTypeName)
 		}
 	case AgentTypeGeminiACP:
 		if cfg.GeminiACP != nil && len(cfg.GeminiACP.Cmd) > 0 {
-			return fmt.Sprintf("cmd must be omitted for type %s", AgentTypeGeminiACP)
+			return fmt.Sprintf("cmd must be omitted for type %s", rawTypeName)
 		}
 	case AgentTypeCodexACP:
 		if cfg.CodexACP != nil && len(cfg.CodexACP.Cmd) > 0 {
-			return fmt.Sprintf("cmd must be omitted for type %s", AgentTypeCodexACP)
+			return fmt.Sprintf("cmd must be omitted for type %s", rawTypeName)
 		}
 	case AgentTypeOpenCodeACP:
 		if cfg.OpenCodeACP != nil && len(cfg.OpenCodeACP.Cmd) > 0 {
-			return fmt.Sprintf("cmd must be omitted for type %s", AgentTypeOpenCodeACP)
+			return fmt.Sprintf("cmd must be omitted for type %s", rawTypeName)
 		}
 	case AgentTypeCopilotACP:
 		if cfg.CopilotACP != nil && len(cfg.CopilotACP.Cmd) > 0 {
-			return fmt.Sprintf("cmd must be omitted for type %s", AgentTypeCopilotACP)
+			return fmt.Sprintf("cmd must be omitted for type %s", rawTypeName)
 		}
-	case AgentTypeClaudeCodeACP:
+	case AgentTypeClaudeCodeACP, AgentTypeClaudeACP:
 		if cfg.ClaudeCodeACP != nil && len(cfg.ClaudeCodeACP.Cmd) > 0 {
-			return fmt.Sprintf("cmd must be omitted for type %s", AgentTypeClaudeCodeACP)
+			return fmt.Sprintf("cmd must be omitted for type %s", rawTypeName)
 		}
 	case AgentTypeOpenAI:
 		if cfg.OpenAI == nil {
-			return fmt.Sprintf("openai block is required for type %s", AgentTypeOpenAI)
+			return fmt.Sprintf("openai block is required for type %s", rawTypeName)
 		}
 	case AgentTypeAIStudio:
 		if cfg.AIStudio == nil {
-			return fmt.Sprintf("aistudio block is required for type %s", AgentTypeAIStudio)
+			return fmt.Sprintf("aistudio block is required for type %s", rawTypeName)
 		}
 	case AgentTypePool:
 		if cfg.PoolConfig == nil || len(cfg.PoolConfig.Members) == 0 {
@@ -539,7 +543,7 @@ func NormalizeConfig(cfg Config, executablePath string) (ResolvedConfig, error) 
 		SystemInstructions: cfg.SystemInstructions,
 	}
 
-	switch strings.TrimSpace(cfg.Type) {
+	switch canonicalAgentType(cfg.Type) {
 	case AgentTypeGeminiACP:
 		if cfg.GeminiACP == nil {
 			return ResolvedConfig{}, fmt.Errorf("gemini_acp block is required")
@@ -585,7 +589,7 @@ func NormalizeConfig(cfg Config, executablePath string) (ResolvedConfig, error) 
 			ReasoningEffort: copilotACP.ReasoningEffort,
 			Mode:            copilotACP.Mode,
 		}), nil
-	case AgentTypeClaudeCodeACP:
+	case AgentTypeClaudeCodeACP, AgentTypeClaudeACP:
 		if cfg.ClaudeCodeACP == nil {
 			return ResolvedConfig{}, fmt.Errorf("claude_code_acp block is required")
 		}
@@ -696,7 +700,7 @@ func resolveTemplatedArgs(args []string, model string) []string {
 }
 
 func (c Config) selectedACPBlock() (*ACPConfig, bool) {
-	switch strings.TrimSpace(c.Type) {
+	switch canonicalAgentType(c.Type) {
 	case AgentTypeGenericACP:
 		return c.GenericACP, c.GenericACP != nil
 	case AgentTypeGeminiACP:
@@ -707,7 +711,7 @@ func (c Config) selectedACPBlock() (*ACPConfig, bool) {
 		return c.OpenCodeACP, c.OpenCodeACP != nil
 	case AgentTypeCopilotACP:
 		return c.CopilotACP, c.CopilotACP != nil
-	case AgentTypeClaudeCodeACP:
+	case AgentTypeClaudeCodeACP, AgentTypeClaudeACP:
 		return c.ClaudeCodeACP, c.ClaudeCodeACP != nil
 	default:
 		return nil, false
@@ -726,9 +730,18 @@ func (c Config) selectedLocalAPIBlock() (*LocalAPIConfig, bool) {
 }
 
 func validateAgentConfigSemantics(cfg Config) error {
-	if strings.TrimSpace(cfg.Type) == AgentTypeGeminiACP {
+	if canonicalAgentType(cfg.Type) == AgentTypeGeminiACP {
 		return fmt.Errorf("%s is deprecated and no longer supported", AgentTypeGeminiACP)
 	}
 
 	return nil
+}
+
+func canonicalAgentType(agentType string) string {
+	switch strings.TrimSpace(agentType) {
+	case AgentTypeClaudeACP:
+		return AgentTypeClaudeCodeACP
+	default:
+		return strings.TrimSpace(agentType)
+	}
 }
