@@ -422,13 +422,13 @@ func validateAgentBlocks(fl validator.FieldLevel) bool {
 	case AgentTypeGeminiACP:
 		return cfg.GeminiACP != nil && len(cfg.GeminiACP.Cmd) == 0
 	case AgentTypeCodexACP:
-		return cfg.CodexACP != nil && len(cfg.CodexACP.Cmd) == 0
+		return cfg.CodexACP != nil
 	case AgentTypeOpenCodeACP:
-		return cfg.OpenCodeACP != nil && len(cfg.OpenCodeACP.Cmd) == 0
+		return cfg.OpenCodeACP != nil
 	case AgentTypeCopilotACP:
-		return cfg.CopilotACP == nil || len(cfg.CopilotACP.Cmd) == 0
+		return cfg.CopilotACP != nil
 	case AgentTypeClaudeCodeACP:
-		return cfg.ClaudeCodeACP != nil && len(cfg.ClaudeCodeACP.Cmd) == 0
+		return cfg.ClaudeCodeACP != nil
 	case AgentTypeOpenAI:
 		return cfg.OpenAI != nil
 	case AgentTypeAIStudio:
@@ -486,21 +486,9 @@ func explainAgentBlocksError(cfg Config) string {
 			return fmt.Sprintf("cmd must be omitted for type %s", AgentTypeGeminiACP)
 		}
 	case AgentTypeCodexACP:
-		if cfg.CodexACP != nil && len(cfg.CodexACP.Cmd) > 0 {
-			return fmt.Sprintf("cmd must be omitted for type %s", AgentTypeCodexACP)
-		}
 	case AgentTypeOpenCodeACP:
-		if cfg.OpenCodeACP != nil && len(cfg.OpenCodeACP.Cmd) > 0 {
-			return fmt.Sprintf("cmd must be omitted for type %s", AgentTypeOpenCodeACP)
-		}
 	case AgentTypeCopilotACP:
-		if cfg.CopilotACP != nil && len(cfg.CopilotACP.Cmd) > 0 {
-			return fmt.Sprintf("cmd must be omitted for type %s", AgentTypeCopilotACP)
-		}
 	case AgentTypeClaudeCodeACP:
-		if cfg.ClaudeCodeACP != nil && len(cfg.ClaudeCodeACP.Cmd) > 0 {
-			return fmt.Sprintf("cmd must be omitted for type %s", AgentTypeClaudeCodeACP)
-		}
 	case AgentTypeOpenAI:
 		if cfg.OpenAI == nil {
 			return fmt.Sprintf("openai block is required for type %s", AgentTypeOpenAI)
@@ -556,7 +544,7 @@ func NormalizeConfig(cfg Config, executablePath string) (ResolvedConfig, error) 
 			return ResolvedConfig{}, fmt.Errorf("opencode_acp block is required")
 		}
 		return resolveACPConfig(resolved, AgentTypeGenericACP, ACPConfig{
-			Cmd:             []string{"opencode", "acp"},
+			Cmd:             commandOrDefault(cfg.OpenCodeACP.Cmd, []string{"opencode", "acp"}),
 			ExtraArgs:       append([]string(nil), cfg.OpenCodeACP.ExtraArgs...),
 			Model:           cfg.OpenCodeACP.Model,
 			ReasoningEffort: cfg.OpenCodeACP.ReasoningEffort,
@@ -567,7 +555,7 @@ func NormalizeConfig(cfg Config, executablePath string) (ResolvedConfig, error) 
 			return ResolvedConfig{}, fmt.Errorf("codex_acp block is required")
 		}
 		return resolveACPConfig(resolved, AgentTypeGenericACP, ACPConfig{
-			Cmd:             []string{npxCommand, npxYesFlag, codexACPBridgePackage(cfg.CodexACP.BridgeVersion)},
+			Cmd:             commandOrDefault(cfg.CodexACP.Cmd, []string{npxCommand, npxYesFlag, codexACPBridgePackage(cfg.CodexACP.BridgeVersion)}),
 			ExtraArgs:       append([]string(nil), cfg.CodexACP.ExtraArgs...),
 			Model:           cfg.CodexACP.Model,
 			ReasoningEffort: cfg.CodexACP.ReasoningEffort,
@@ -579,7 +567,7 @@ func NormalizeConfig(cfg Config, executablePath string) (ResolvedConfig, error) 
 			copilotACP = &ACPConfig{}
 		}
 		return resolveACPConfig(resolved, AgentTypeGenericACP, ACPConfig{
-			Cmd:             []string{"copilot", "--acp", "--stdio"},
+			Cmd:             commandOrDefault(copilotACP.Cmd, []string{"copilot", "--acp", "--stdio"}),
 			ExtraArgs:       append([]string(nil), copilotACP.ExtraArgs...),
 			Model:           copilotACP.Model,
 			ReasoningEffort: copilotACP.ReasoningEffort,
@@ -590,7 +578,7 @@ func NormalizeConfig(cfg Config, executablePath string) (ResolvedConfig, error) 
 			return ResolvedConfig{}, fmt.Errorf("claude_code_acp block is required")
 		}
 		return resolveACPConfig(resolved, AgentTypeGenericACP, ACPConfig{
-			Cmd:             []string{"npx", "-y", "@zed-industries/claude-code-acp@latest"},
+			Cmd:             commandOrDefault(cfg.ClaudeCodeACP.Cmd, []string{"npx", "-y", "@zed-industries/claude-code-acp@latest"}),
 			ExtraArgs:       append([]string(nil), cfg.ClaudeCodeACP.ExtraArgs...),
 			Model:           cfg.ClaudeCodeACP.Model,
 			ReasoningEffort: cfg.ClaudeCodeACP.ReasoningEffort,
@@ -667,6 +655,13 @@ func resolveACPConfig(base ResolvedConfig, resolvedType string, spec ACPConfig) 
 		base.Command = append(base.Command, resolveTemplatedArgs(spec.ExtraArgs, spec.Model)...)
 	}
 	return base
+}
+
+func commandOrDefault(command, fallback []string) []string {
+	if len(command) > 0 {
+		return append([]string(nil), command...)
+	}
+	return append([]string(nil), fallback...)
 }
 
 func codexACPBridgePackage(version string) string {

@@ -57,12 +57,11 @@ func TestConfigValidate(t *testing.T) {
 			wantErr: "gemini_acp is deprecated and no longer supported",
 		},
 		{
-			name: "claude_code_alias_forbids_cmd",
+			name: "claude_code_alias_accepts_cmd",
 			cfg: Config{
 				Type:          AgentTypeClaudeCodeACP,
 				ClaudeCodeACP: &ACPConfig{Cmd: []string{"npx", "-y", "@zed-industries/claude-code-acp@latest"}},
 			},
-			wantErr: "cmd must be omitted for type claude_code_acp",
 		},
 		{
 			name: "cmd_item_must_be_nonempty",
