@@ -86,7 +86,7 @@ func main() {
 		"codex": {
 			Type: agentconfig.AgentTypeCodexACP,
 			CodexACP: &agentconfig.ACPConfig{
-				BridgeVersion: "latest",
+				BridgeVersion: "1.7.3",
 			},
 		},
 	}
@@ -103,7 +103,7 @@ func main() {
 ```
 
 For `codex_acp`, `bridge_version` accepts an npm version or dist-tag for
-`@normahq/codex-acp-bridge`; empty defaults to `latest`.
+`@normahq/codex-acp-bridge`; empty defaults to the tested `1.7.3` release.
 
 `reasoning_effort` is a generic ACP config field and may be set on any ACP-backed
 provider config (`generic_acp`, `codex_acp`, `opencode_acp`, `copilot_acp`,

@@ -8,6 +8,14 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+func TestCodexACPBridgePackageUsesPinnedDefault(t *testing.T) {
+	t.Parallel()
+
+	if got, want := codexACPBridgePackage(""), "@normahq/codex-acp-bridge@1.7.3"; got != want {
+		t.Fatalf("codexACPBridgePackage(\"\") = %q, want %q", got, want)
+	}
+}
+
 func TestConfigValidate(t *testing.T) {
 	t.Parallel()
 
