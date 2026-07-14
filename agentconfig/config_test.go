@@ -8,6 +8,14 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+func TestCodexACPBridgePackageUsesPinnedDefault(t *testing.T) {
+	t.Parallel()
+
+	if got, want := codexACPBridgePackage(""), "@normahq/codex-acp-bridge@1.7.3"; got != want {
+		t.Fatalf("codexACPBridgePackage(\"\") = %q, want %q", got, want)
+	}
+}
+
 func TestConfigValidate(t *testing.T) {
 	t.Parallel()
 
@@ -57,20 +65,25 @@ func TestConfigValidate(t *testing.T) {
 			wantErr: "gemini_acp is deprecated and no longer supported",
 		},
 		{
-			name: "claude_code_alias_forbids_cmd",
+			name: "claude_code_alias_accepts_cmd",
 			cfg: Config{
 				Type:          AgentTypeClaudeCodeACP,
 				ClaudeCodeACP: &ACPConfig{Cmd: []string{"npx", "-y", "@zed-industries/claude-code-acp@latest"}},
 			},
-			wantErr: "cmd must be omitted for type claude_code_acp",
 		},
 		{
-			name: "claude_alias_forbids_cmd",
+			name: "grok_alias_accepts_cmd",
+			cfg: Config{
+				Type:    AgentTypeGrokACP,
+				GrokACP: &ACPConfig{Cmd: []string{"grok", "agent", "stdio"}},
+			},
+		},
+		{
+			name: "claude_alias_accepts_cmd",
 			cfg: Config{
 				Type:          AgentTypeClaudeACP,
 				ClaudeCodeACP: &ACPConfig{Cmd: []string{"npx", "-y", "@zed-industries/claude-code-acp@latest"}},
 			},
-			wantErr: "cmd must be omitted for type claude_acp",
 		},
 		{
 			name: "cmd_item_must_be_nonempty",
@@ -300,6 +313,26 @@ func TestNormalizeConfig(t *testing.T) {
 				Command: []string{"npx", "-y", "@zed-industries/claude-code-acp@latest", "--trace"},
 				Model:   "claude-sonnet-4-20250514",
 				Mode:    "code",
+			},
+		},
+		{
+			name: "grok_alias",
+			cfg: Config{
+				Type: AgentTypeGrokACP,
+				GrokACP: &ACPConfig{
+					Model:           "grok-4.5",
+					ReasoningEffort: "high",
+					Mode:            "plan",
+					ExtraArgs:       []string{"--trace"},
+				},
+			},
+			exec: execPath,
+			want: ResolvedConfig{
+				Type:            AgentTypeGenericACP,
+				Command:         []string{"grok", "agent", "stdio", "--trace"},
+				Model:           "grok-4.5",
+				Mode:            "plan",
+				ReasoningEffort: "high",
 			},
 		},
 		{

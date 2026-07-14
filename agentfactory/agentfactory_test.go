@@ -241,7 +241,6 @@ func TestFactoryBuild_AllowsReasoningEffortOverrideForGenericACP(t *testing.T) {
 		capturedReasoningEffort = cfg.ReasoningEffort
 		return nil, nil
 	}
-
 	agents := map[string]agentconfig.Config{
 		"test-acp": {
 			Type: agentconfig.AgentTypeGenericACP,

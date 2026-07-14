@@ -57,7 +57,7 @@ type ACPConfig struct {
 
 const (
 	codexACPBridgePackageName    = "@normahq/codex-acp-bridge"
-	defaultCodexACPBridgeVersion = "latest"
+	defaultCodexACPBridgeVersion = "1.7.3"
 	npxCommand                   = "npx"
 	npxYesFlag                   = "-y"
 )
@@ -85,7 +85,7 @@ type PoolConfig struct {
 //	  ...type-specific config...
 type Config struct {
 	// Type selects the runtime backend implementation.
-	Type string `json:"type"                           yaml:"type"                           mapstructure:"type"                validate:"required,oneof=generic_acp gemini_acp codex_acp opencode_acp copilot_acp claude_code_acp claude_acp openai aistudio pool,agent_blocks"`
+	Type string `json:"type"                           yaml:"type"                           mapstructure:"type"                validate:"required,oneof=generic_acp gemini_acp codex_acp opencode_acp copilot_acp claude_code_acp claude_acp grok_acp openai aistudio pool,agent_blocks"`
 	// MCPServers lists MCP server IDs resolved by higher-level registries.
 	MCPServers []string `json:"mcp_servers,omitempty"          yaml:"mcp_servers,omitempty"          mapstructure:"mcp_servers"         validate:"omitempty,dive,notblank"`
 	// SystemInstructions defines provider-level instructions applied by default.
@@ -103,6 +103,8 @@ type Config struct {
 	CopilotACP *ACPConfig `json:"copilot_acp,omitempty"     yaml:"copilot_acp,omitempty"     mapstructure:"copilot_acp"`
 	// ClaudeCodeACP configures the Claude Code ACP alias.
 	ClaudeCodeACP *ACPConfig `json:"claude_code_acp,omitempty" yaml:"claude_code_acp,omitempty" mapstructure:"claude_code_acp"`
+	// GrokACP configures the Grok Build ACP alias.
+	GrokACP *ACPConfig `json:"grok_acp,omitempty"        yaml:"grok_acp,omitempty"        mapstructure:"grok_acp"`
 	// OpenAI configures a local OpenAI-backed hosted agent.
 	OpenAI *LocalAPIConfig `json:"openai,omitempty"         yaml:"openai,omitempty"          mapstructure:"openai"`
 	// AIStudio configures a local Google AI Studio-backed hosted agent.
@@ -262,6 +264,8 @@ const (
 	AgentTypeClaudeCodeACP = "claude_code_acp"
 	// AgentTypeClaudeACP is a compatibility alias for Claude Code ACP mode.
 	AgentTypeClaudeACP = "claude_acp"
+	// AgentTypeGrokACP is the alias for Grok Build ACP mode.
+	AgentTypeGrokACP = "grok_acp"
 	// AgentTypeOpenAI is the type for local OpenAI-backed providers.
 	AgentTypeOpenAI = "openai"
 	// AgentTypeAIStudio is the type for local Google AI Studio-backed providers.
@@ -278,6 +282,8 @@ func SupportedAgentTypes() []string {
 		AgentTypeOpenCodeACP,
 		AgentTypeCopilotACP,
 		AgentTypeClaudeCodeACP,
+		AgentTypeClaudeACP,
+		AgentTypeGrokACP,
 		AgentTypeClaudeACP,
 		AgentTypeOpenAI,
 		AgentTypeAIStudio,
@@ -303,7 +309,7 @@ func IsPoolType(agentType string) bool {
 // IsACPType reports whether an agent type uses the ACP runtime.
 func IsACPType(agentType string) bool {
 	switch canonicalAgentType(agentType) {
-	case AgentTypeGenericACP, AgentTypeOpenCodeACP, AgentTypeCodexACP, AgentTypeCopilotACP, AgentTypeClaudeCodeACP, AgentTypeClaudeACP:
+	case AgentTypeGenericACP, AgentTypeOpenCodeACP, AgentTypeCodexACP, AgentTypeCopilotACP, AgentTypeClaudeCodeACP, AgentTypeGrokACP:
 		return true
 	default:
 		return false
@@ -403,6 +409,9 @@ func validateAgentBlocks(fl validator.FieldLevel) bool {
 	if cfg.ClaudeCodeACP != nil {
 		present++
 	}
+	if cfg.GrokACP != nil {
+		present++
+	}
 	if cfg.OpenAI != nil {
 		present++
 	}
@@ -425,13 +434,17 @@ func validateAgentBlocks(fl validator.FieldLevel) bool {
 	case AgentTypeGeminiACP:
 		return cfg.GeminiACP != nil && len(cfg.GeminiACP.Cmd) == 0
 	case AgentTypeCodexACP:
-		return cfg.CodexACP != nil && len(cfg.CodexACP.Cmd) == 0
+		return cfg.CodexACP != nil
 	case AgentTypeOpenCodeACP:
-		return cfg.OpenCodeACP != nil && len(cfg.OpenCodeACP.Cmd) == 0
+		return cfg.OpenCodeACP != nil
 	case AgentTypeCopilotACP:
-		return cfg.CopilotACP == nil || len(cfg.CopilotACP.Cmd) == 0
-	case AgentTypeClaudeCodeACP, AgentTypeClaudeACP:
-		return cfg.ClaudeCodeACP != nil && len(cfg.ClaudeCodeACP.Cmd) == 0
+		return cfg.CopilotACP != nil
+	case AgentTypeClaudeCodeACP:
+		return cfg.ClaudeCodeACP != nil
+	case AgentTypeGrokACP:
+		return cfg.GrokACP != nil
+	case AgentTypeClaudeACP:
+		return cfg.ClaudeCodeACP != nil
 	case AgentTypeOpenAI:
 		return cfg.OpenAI != nil
 	case AgentTypeAIStudio:
@@ -451,6 +464,7 @@ func explainAgentBlocksError(cfg Config) string {
 		AgentTypeOpenCodeACP:   cfg.OpenCodeACP != nil,
 		AgentTypeCopilotACP:    cfg.CopilotACP != nil,
 		AgentTypeClaudeCodeACP: cfg.ClaudeCodeACP != nil,
+		AgentTypeGrokACP:       cfg.GrokACP != nil,
 		AgentTypeOpenAI:        cfg.OpenAI != nil,
 		AgentTypeAIStudio:      cfg.AIStudio != nil,
 		AgentTypePool:          cfg.PoolConfig != nil,
@@ -490,21 +504,11 @@ func explainAgentBlocksError(cfg Config) string {
 			return fmt.Sprintf("cmd must be omitted for type %s", rawTypeName)
 		}
 	case AgentTypeCodexACP:
-		if cfg.CodexACP != nil && len(cfg.CodexACP.Cmd) > 0 {
-			return fmt.Sprintf("cmd must be omitted for type %s", rawTypeName)
-		}
 	case AgentTypeOpenCodeACP:
-		if cfg.OpenCodeACP != nil && len(cfg.OpenCodeACP.Cmd) > 0 {
-			return fmt.Sprintf("cmd must be omitted for type %s", rawTypeName)
-		}
 	case AgentTypeCopilotACP:
-		if cfg.CopilotACP != nil && len(cfg.CopilotACP.Cmd) > 0 {
-			return fmt.Sprintf("cmd must be omitted for type %s", rawTypeName)
-		}
-	case AgentTypeClaudeCodeACP, AgentTypeClaudeACP:
-		if cfg.ClaudeCodeACP != nil && len(cfg.ClaudeCodeACP.Cmd) > 0 {
-			return fmt.Sprintf("cmd must be omitted for type %s", rawTypeName)
-		}
+	case AgentTypeClaudeCodeACP:
+	case AgentTypeClaudeACP:
+	case AgentTypeGrokACP:
 	case AgentTypeOpenAI:
 		if cfg.OpenAI == nil {
 			return fmt.Sprintf("openai block is required for type %s", rawTypeName)
@@ -560,7 +564,7 @@ func NormalizeConfig(cfg Config, executablePath string) (ResolvedConfig, error) 
 			return ResolvedConfig{}, fmt.Errorf("opencode_acp block is required")
 		}
 		return resolveACPConfig(resolved, AgentTypeGenericACP, ACPConfig{
-			Cmd:             []string{"opencode", "acp"},
+			Cmd:             commandOrDefault(cfg.OpenCodeACP.Cmd, []string{"opencode", "acp"}),
 			ExtraArgs:       append([]string(nil), cfg.OpenCodeACP.ExtraArgs...),
 			Model:           cfg.OpenCodeACP.Model,
 			ReasoningEffort: cfg.OpenCodeACP.ReasoningEffort,
@@ -571,7 +575,7 @@ func NormalizeConfig(cfg Config, executablePath string) (ResolvedConfig, error) 
 			return ResolvedConfig{}, fmt.Errorf("codex_acp block is required")
 		}
 		return resolveACPConfig(resolved, AgentTypeGenericACP, ACPConfig{
-			Cmd:             []string{npxCommand, npxYesFlag, codexACPBridgePackage(cfg.CodexACP.BridgeVersion)},
+			Cmd:             commandOrDefault(cfg.CodexACP.Cmd, []string{npxCommand, npxYesFlag, codexACPBridgePackage(cfg.CodexACP.BridgeVersion)}),
 			ExtraArgs:       append([]string(nil), cfg.CodexACP.ExtraArgs...),
 			Model:           cfg.CodexACP.Model,
 			ReasoningEffort: cfg.CodexACP.ReasoningEffort,
@@ -583,7 +587,7 @@ func NormalizeConfig(cfg Config, executablePath string) (ResolvedConfig, error) 
 			copilotACP = &ACPConfig{}
 		}
 		return resolveACPConfig(resolved, AgentTypeGenericACP, ACPConfig{
-			Cmd:             []string{"copilot", "--acp", "--stdio"},
+			Cmd:             commandOrDefault(copilotACP.Cmd, []string{"copilot", "--acp", "--stdio"}),
 			ExtraArgs:       append([]string(nil), copilotACP.ExtraArgs...),
 			Model:           copilotACP.Model,
 			ReasoningEffort: copilotACP.ReasoningEffort,
@@ -594,11 +598,22 @@ func NormalizeConfig(cfg Config, executablePath string) (ResolvedConfig, error) 
 			return ResolvedConfig{}, fmt.Errorf("claude_code_acp block is required")
 		}
 		return resolveACPConfig(resolved, AgentTypeGenericACP, ACPConfig{
-			Cmd:             []string{"npx", "-y", "@zed-industries/claude-code-acp@latest"},
+			Cmd:             commandOrDefault(cfg.ClaudeCodeACP.Cmd, []string{"npx", "-y", "@zed-industries/claude-code-acp@latest"}),
 			ExtraArgs:       append([]string(nil), cfg.ClaudeCodeACP.ExtraArgs...),
 			Model:           cfg.ClaudeCodeACP.Model,
 			ReasoningEffort: cfg.ClaudeCodeACP.ReasoningEffort,
 			Mode:            cfg.ClaudeCodeACP.Mode,
+		}), nil
+	case AgentTypeGrokACP:
+		if cfg.GrokACP == nil {
+			return ResolvedConfig{}, fmt.Errorf("grok_acp block is required")
+		}
+		return resolveACPConfig(resolved, AgentTypeGenericACP, ACPConfig{
+			Cmd:             commandOrDefault(cfg.GrokACP.Cmd, []string{"grok", "agent", "stdio"}),
+			ExtraArgs:       append([]string(nil), cfg.GrokACP.ExtraArgs...),
+			Model:           cfg.GrokACP.Model,
+			ReasoningEffort: cfg.GrokACP.ReasoningEffort,
+			Mode:            cfg.GrokACP.Mode,
 		}), nil
 	case AgentTypeGenericACP:
 		if cfg.GenericACP == nil {
@@ -673,6 +688,13 @@ func resolveACPConfig(base ResolvedConfig, resolvedType string, spec ACPConfig) 
 	return base
 }
 
+func commandOrDefault(command, fallback []string) []string {
+	if len(command) > 0 {
+		return append([]string(nil), command...)
+	}
+	return append([]string(nil), fallback...)
+}
+
 func codexACPBridgePackage(version string) string {
 	version = strings.TrimPrefix(strings.TrimSpace(version), "@")
 	if version == "" {
@@ -713,6 +735,8 @@ func (c Config) selectedACPBlock() (*ACPConfig, bool) {
 		return c.CopilotACP, c.CopilotACP != nil
 	case AgentTypeClaudeCodeACP, AgentTypeClaudeACP:
 		return c.ClaudeCodeACP, c.ClaudeCodeACP != nil
+	case AgentTypeGrokACP:
+		return c.GrokACP, c.GrokACP != nil
 	default:
 		return nil, false
 	}
