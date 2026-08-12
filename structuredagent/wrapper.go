@@ -432,6 +432,9 @@ func (w *wrapperAgent) collectWrappedOutput(ctx adkagent.InvocationContext) (str
 			continue
 		}
 		totalEvents++
+		if err := wrappedEventError(ev); err != nil {
+			return "", totalEvents, textEventCount, sawTurnComplete, err
+		}
 		text := eventText(ev)
 
 		if text != "" {
@@ -462,6 +465,24 @@ func (w *wrapperAgent) collectWrappedOutput(ctx adkagent.InvocationContext) (str
 		return finalText, totalEvents, textEventCount, sawTurnComplete, nil
 	}
 	return partialText.String(), totalEvents, textEventCount, sawTurnComplete, nil
+}
+
+func wrappedEventError(ev *session.Event) error {
+	if ev == nil {
+		return nil
+	}
+	code := strings.TrimSpace(ev.ErrorCode)
+	message := strings.TrimSpace(ev.ErrorMessage)
+	switch {
+	case code != "" && message != "":
+		return fmt.Errorf("wrapped agent error %s: %s", code, message)
+	case code != "":
+		return fmt.Errorf("wrapped agent error: %s", code)
+	case message != "":
+		return fmt.Errorf("wrapped agent error: %s", message)
+	default:
+		return nil
+	}
 }
 
 type wrapperInvocationContext struct {
