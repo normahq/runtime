@@ -601,6 +601,75 @@ func TestWrapperAgentIncludesTextFromTurnCompleteEvent(t *testing.T) {
 	}
 }
 
+func TestWrapperAgentPropagatesTerminalEventErrorsWithoutRetry(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		code        string
+		message     string
+		wantMessage string
+	}{
+		{
+			name:        "code and message",
+			code:        "other",
+			message:     "You have no credits remaining",
+			wantMessage: "wrapped agent error other: You have no credits remaining",
+		},
+		{
+			name:        "code only",
+			code:        "quota_exceeded",
+			wantMessage: "wrapped agent error: quota_exceeded",
+		},
+		{
+			name:        "message only",
+			message:     "provider unavailable",
+			wantMessage: "wrapped agent error: provider unavailable",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var calls int32
+			inner, err := adkagent.New(adkagent.Config{
+				Name:        "TerminalErrorInner",
+				Description: "Inner agent emits a terminal event error",
+				Run: func(ctx adkagent.InvocationContext) iter.Seq2[*session.Event, error] {
+					return func(yield func(*session.Event, error) bool) {
+						atomic.AddInt32(&calls, 1)
+						ev := session.NewEvent(context.Background(), ctx.InvocationID())
+						ev.ErrorCode = tt.code
+						ev.ErrorMessage = tt.message
+						ev.TurnComplete = true
+						_ = yield(ev, nil)
+					}
+				},
+			})
+			if err != nil {
+				t.Fatalf("agent.New() error = %v", err)
+			}
+
+			wrapped, err := NewAgent(inner, WithoutInputSchema(), WithOutputValidationRetries(3))
+			if err != nil {
+				t.Fatalf("NewAgent() error = %v", err)
+			}
+
+			_, runErr := runSingleTurn(t, wrapped, "review")
+			if runErr == nil {
+				t.Fatal("runSingleTurn() error = nil, want terminal event error")
+			}
+			if !strings.Contains(runErr.Error(), tt.wantMessage) {
+				t.Fatalf("runSingleTurn() error = %q, want %q", runErr, tt.wantMessage)
+			}
+			if got := atomic.LoadInt32(&calls); got != 1 {
+				t.Fatalf("inner agent calls = %d, want 1", got)
+			}
+		})
+	}
+}
+
 func TestContentText_IgnoresThoughtChunks(t *testing.T) {
 	t.Parallel()
 
