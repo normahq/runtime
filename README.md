@@ -105,9 +105,16 @@ func main() {
 For `codex_acp`, `bridge_version` accepts an npm version or dist-tag for
 `@normahq/codex-acp-bridge`; empty defaults to the tested `1.7.3` release.
 
+`registry_acp` allows running any agent from the official [ACP Registry](https://agentclientprotocol.com)
+by specifying `registry_id` (e.g. `amp-acp`, `cline`, `auggie`, `codebuddy`, `claude-acp`, etc.).
+It runs the agent via `@baldaworks/acprun` (defaulting to pinned `0.1.6`, customizable via `bridge_version`).
+
+`agy_acp` (and compatibility alias `antigravity_acp`) runs the Google Antigravity CLI ACP
+agent (`antigravity-acp`) via `@baldaworks/acprun`.
+
 `reasoning_effort` is a generic ACP config field and may be set on any ACP-backed
 provider config (`generic_acp`, `codex_acp`, `opencode_acp`, `copilot_acp`,
-`claude_code_acp`, `claude_acp`). Runtime forwards it to the ACP agent config and leaves
+`claude_code_acp`, `claude_acp`, `grok_acp`, `registry_acp`, `agy_acp`, `antigravity_acp`). Runtime forwards it to the ACP agent config and leaves
 backend-specific handling to the concrete ACP implementation.
 
 `claude_acp` is a compatibility alias for `claude_code_acp`. Both use the same

@@ -15,6 +15,9 @@ func TestNormalizeConfig_ACPAliasCommandOverride(t *testing.T) {
 		{"opencode", Config{Type: AgentTypeOpenCodeACP, OpenCodeACP: &ACPConfig{Cmd: []string{"custom-opencode"}, ExtraArgs: []string{"--stdio"}, Model: "model", ReasoningEffort: "high", Mode: "review"}}},
 		{"copilot", Config{Type: AgentTypeCopilotACP, CopilotACP: &ACPConfig{Cmd: []string{"custom-copilot"}, ExtraArgs: []string{"--stdio"}, Model: "model", ReasoningEffort: "high", Mode: "review"}}},
 		{"grok", Config{Type: AgentTypeGrokACP, GrokACP: &ACPConfig{Cmd: []string{"custom-grok"}, ExtraArgs: []string{"--stdio"}, Model: "model", ReasoningEffort: "high", Mode: "review"}}},
+		{"agy", Config{Type: AgentTypeAgyACP, AgyACP: &ACPConfig{Cmd: []string{"custom-agy"}, ExtraArgs: []string{"--stdio"}, Model: "model", ReasoningEffort: "high", Mode: "review"}}},
+		{"antigravity", Config{Type: AgentTypeAntigravityACP, AntigravityACP: &ACPConfig{Cmd: []string{"custom-antigravity"}, ExtraArgs: []string{"--stdio"}, Model: "model", ReasoningEffort: "high", Mode: "review"}}},
+		{"registry", Config{Type: AgentTypeRegistryACP, RegistryACP: &ACPConfig{Cmd: []string{"custom-registry"}, ExtraArgs: []string{"--stdio"}, Model: "model", ReasoningEffort: "high", Mode: "review"}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

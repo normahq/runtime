@@ -53,14 +53,26 @@ type ACPConfig struct {
 	Mode string `json:"mode,omitempty"       yaml:"mode,omitempty"       mapstructure:"mode"       validate:"omitempty,notblank"`
 	// BridgeVersion selects the Codex ACP bridge npm version or dist-tag.
 	BridgeVersion string `json:"bridge_version,omitempty" yaml:"bridge_version,omitempty" mapstructure:"bridge_version" validate:"omitempty,notblank"`
+	// RegistryID selects the agent identifier within the ACP Registry.
+	RegistryID string `json:"registry_id,omitempty" yaml:"registry_id,omitempty" mapstructure:"registry_id" validate:"omitempty,notblank"`
 }
 
 const (
 	codexACPBridgePackageName    = "@normahq/codex-acp-bridge"
 	defaultCodexACPBridgeVersion = "1.7.3"
+	acpRunPackageName            = "@baldaworks/acprun"
+	defaultACPRunVersion         = "0.1.6"
 	npxCommand                   = "npx"
 	npxYesFlag                   = "-y"
 )
+
+func acpRunPackage(version string) string {
+	version = strings.TrimPrefix(strings.TrimSpace(version), "@")
+	if version == "" {
+		version = defaultACPRunVersion
+	}
+	return acpRunPackageName + "@" + version
+}
 
 // LocalAPIConfig is a local API-backed runtime configuration block.
 type LocalAPIConfig struct {
@@ -85,7 +97,7 @@ type PoolConfig struct {
 //	  ...type-specific config...
 type Config struct {
 	// Type selects the runtime backend implementation.
-	Type string `json:"type"                           yaml:"type"                           mapstructure:"type"                validate:"required,oneof=generic_acp gemini_acp codex_acp opencode_acp copilot_acp claude_code_acp claude_acp grok_acp openai aistudio pool,agent_blocks"`
+	Type string `json:"type"                           yaml:"type"                           mapstructure:"type"                validate:"required,oneof=generic_acp gemini_acp codex_acp opencode_acp copilot_acp claude_code_acp claude_acp grok_acp registry_acp agy_acp antigravity_acp openai aistudio pool,agent_blocks"`
 	// MCPServers lists MCP server IDs resolved by higher-level registries.
 	MCPServers []string `json:"mcp_servers,omitempty"          yaml:"mcp_servers,omitempty"          mapstructure:"mcp_servers"         validate:"omitempty,dive,notblank"`
 	// SystemInstructions defines provider-level instructions applied by default.
@@ -105,6 +117,12 @@ type Config struct {
 	ClaudeCodeACP *ACPConfig `json:"claude_code_acp,omitempty" yaml:"claude_code_acp,omitempty" mapstructure:"claude_code_acp"`
 	// GrokACP configures the Grok Build ACP alias.
 	GrokACP *ACPConfig `json:"grok_acp,omitempty"        yaml:"grok_acp,omitempty"        mapstructure:"grok_acp"`
+	// RegistryACP configures an ACP Registry agent.
+	RegistryACP *ACPConfig `json:"registry_acp,omitempty"    yaml:"registry_acp,omitempty"    mapstructure:"registry_acp"`
+	// AgyACP configures the Antigravity CLI ACP alias.
+	AgyACP *ACPConfig `json:"agy_acp,omitempty"         yaml:"agy_acp,omitempty"         mapstructure:"agy_acp"`
+	// AntigravityACP configures the Antigravity CLI ACP alias (alias for agy_acp).
+	AntigravityACP *ACPConfig `json:"antigravity_acp,omitempty" yaml:"antigravity_acp,omitempty" mapstructure:"antigravity_acp"`
 	// OpenAI configures a local OpenAI-backed hosted agent.
 	OpenAI *LocalAPIConfig `json:"openai,omitempty"         yaml:"openai,omitempty"          mapstructure:"openai"`
 	// AIStudio configures a local Google AI Studio-backed hosted agent.
@@ -266,6 +284,12 @@ const (
 	AgentTypeClaudeACP = "claude_acp"
 	// AgentTypeGrokACP is the alias for Grok Build ACP mode.
 	AgentTypeGrokACP = "grok_acp"
+	// AgentTypeRegistryACP is the type for ACP agents resolved from the ACP registry.
+	AgentTypeRegistryACP = "registry_acp"
+	// AgentTypeAgyACP is the alias for Antigravity CLI ACP mode.
+	AgentTypeAgyACP = "agy_acp"
+	// AgentTypeAntigravityACP is a compatibility alias for Antigravity CLI ACP mode.
+	AgentTypeAntigravityACP = "antigravity_acp"
 	// AgentTypeOpenAI is the type for local OpenAI-backed providers.
 	AgentTypeOpenAI = "openai"
 	// AgentTypeAIStudio is the type for local Google AI Studio-backed providers.
@@ -284,7 +308,9 @@ func SupportedAgentTypes() []string {
 		AgentTypeClaudeCodeACP,
 		AgentTypeClaudeACP,
 		AgentTypeGrokACP,
-		AgentTypeClaudeACP,
+		AgentTypeRegistryACP,
+		AgentTypeAgyACP,
+		AgentTypeAntigravityACP,
 		AgentTypeOpenAI,
 		AgentTypeAIStudio,
 		AgentTypePool,
@@ -309,7 +335,7 @@ func IsPoolType(agentType string) bool {
 // IsACPType reports whether an agent type uses the ACP runtime.
 func IsACPType(agentType string) bool {
 	switch canonicalAgentType(agentType) {
-	case AgentTypeGenericACP, AgentTypeOpenCodeACP, AgentTypeCodexACP, AgentTypeCopilotACP, AgentTypeClaudeCodeACP, AgentTypeGrokACP:
+	case AgentTypeGenericACP, AgentTypeOpenCodeACP, AgentTypeCodexACP, AgentTypeCopilotACP, AgentTypeClaudeCodeACP, AgentTypeGrokACP, AgentTypeRegistryACP, AgentTypeAgyACP:
 		return true
 	default:
 		return false
@@ -412,6 +438,15 @@ func validateAgentBlocks(fl validator.FieldLevel) bool {
 	if cfg.GrokACP != nil {
 		present++
 	}
+	if cfg.RegistryACP != nil {
+		present++
+	}
+	if cfg.AgyACP != nil {
+		present++
+	}
+	if cfg.AntigravityACP != nil {
+		present++
+	}
 	if cfg.OpenAI != nil {
 		present++
 	}
@@ -443,6 +478,10 @@ func validateAgentBlocks(fl validator.FieldLevel) bool {
 		return cfg.ClaudeCodeACP != nil
 	case AgentTypeGrokACP:
 		return cfg.GrokACP != nil
+	case AgentTypeRegistryACP:
+		return cfg.RegistryACP != nil
+	case AgentTypeAgyACP:
+		return cfg.AgyACP != nil || cfg.AntigravityACP != nil
 	case AgentTypeClaudeACP:
 		return cfg.ClaudeCodeACP != nil
 	case AgentTypeOpenAI:
@@ -465,6 +504,8 @@ func explainAgentBlocksError(cfg Config) string {
 		AgentTypeCopilotACP:    cfg.CopilotACP != nil,
 		AgentTypeClaudeCodeACP: cfg.ClaudeCodeACP != nil,
 		AgentTypeGrokACP:       cfg.GrokACP != nil,
+		AgentTypeRegistryACP:   cfg.RegistryACP != nil,
+		AgentTypeAgyACP:        cfg.AgyACP != nil || cfg.AntigravityACP != nil,
 		AgentTypeOpenAI:        cfg.OpenAI != nil,
 		AgentTypeAIStudio:      cfg.AIStudio != nil,
 		AgentTypePool:          cfg.PoolConfig != nil,
@@ -509,6 +550,9 @@ func explainAgentBlocksError(cfg Config) string {
 	case AgentTypeClaudeCodeACP:
 	case AgentTypeClaudeACP:
 	case AgentTypeGrokACP:
+	case AgentTypeRegistryACP:
+	case AgentTypeAgyACP:
+	case AgentTypeAntigravityACP:
 	case AgentTypeOpenAI:
 		if cfg.OpenAI == nil {
 			return fmt.Sprintf("openai block is required for type %s", rawTypeName)
@@ -614,6 +658,39 @@ func NormalizeConfig(cfg Config, executablePath string) (ResolvedConfig, error) 
 			Model:           cfg.GrokACP.Model,
 			ReasoningEffort: cfg.GrokACP.ReasoningEffort,
 			Mode:            cfg.GrokACP.Mode,
+		}), nil
+	case AgentTypeAgyACP, AgentTypeAntigravityACP:
+		spec := cfg.AgyACP
+		if spec == nil {
+			spec = cfg.AntigravityACP
+		}
+		if spec == nil {
+			return ResolvedConfig{}, fmt.Errorf("agy_acp block is required")
+		}
+		return resolveACPConfig(resolved, AgentTypeGenericACP, ACPConfig{
+			Cmd:             commandOrDefault(spec.Cmd, []string{npxCommand, npxYesFlag, acpRunPackage(spec.BridgeVersion), "run", "antigravity-acp"}),
+			ExtraArgs:       append([]string(nil), spec.ExtraArgs...),
+			Model:           spec.Model,
+			ReasoningEffort: spec.ReasoningEffort,
+			Mode:            spec.Mode,
+		}), nil
+	case AgentTypeRegistryACP:
+		if cfg.RegistryACP == nil {
+			return ResolvedConfig{}, fmt.Errorf("registry_acp block is required")
+		}
+		if strings.TrimSpace(cfg.RegistryACP.RegistryID) == "" && len(cfg.RegistryACP.Cmd) == 0 {
+			return ResolvedConfig{}, fmt.Errorf("registry_id or cmd is required for type registry_acp")
+		}
+		defaultCmd := []string{npxCommand, npxYesFlag, acpRunPackage(cfg.RegistryACP.BridgeVersion), "run"}
+		if id := strings.TrimSpace(cfg.RegistryACP.RegistryID); id != "" {
+			defaultCmd = append(defaultCmd, id)
+		}
+		return resolveACPConfig(resolved, AgentTypeGenericACP, ACPConfig{
+			Cmd:             commandOrDefault(cfg.RegistryACP.Cmd, defaultCmd),
+			ExtraArgs:       append([]string(nil), cfg.RegistryACP.ExtraArgs...),
+			Model:           cfg.RegistryACP.Model,
+			ReasoningEffort: cfg.RegistryACP.ReasoningEffort,
+			Mode:            cfg.RegistryACP.Mode,
 		}), nil
 	case AgentTypeGenericACP:
 		if cfg.GenericACP == nil {
@@ -737,6 +814,13 @@ func (c Config) selectedACPBlock() (*ACPConfig, bool) {
 		return c.ClaudeCodeACP, c.ClaudeCodeACP != nil
 	case AgentTypeGrokACP:
 		return c.GrokACP, c.GrokACP != nil
+	case AgentTypeRegistryACP:
+		return c.RegistryACP, c.RegistryACP != nil
+	case AgentTypeAgyACP, AgentTypeAntigravityACP:
+		if c.AgyACP != nil {
+			return c.AgyACP, true
+		}
+		return c.AntigravityACP, c.AntigravityACP != nil
 	default:
 		return nil, false
 	}
@@ -765,6 +849,8 @@ func canonicalAgentType(agentType string) string {
 	switch strings.TrimSpace(agentType) {
 	case AgentTypeClaudeACP:
 		return AgentTypeClaudeCodeACP
+	case AgentTypeAntigravityACP:
+		return AgentTypeAgyACP
 	default:
 		return strings.TrimSpace(agentType)
 	}

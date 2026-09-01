@@ -16,6 +16,20 @@ func TestCodexACPBridgePackageUsesPinnedDefault(t *testing.T) {
 	}
 }
 
+func TestAcpRunPackageUsesPinnedDefault(t *testing.T) {
+	t.Parallel()
+
+	if got, want := acpRunPackage(""), "@baldaworks/acprun@0.1.6"; got != want {
+		t.Fatalf("acpRunPackage(\"\") = %q, want %q", got, want)
+	}
+	if got, want := acpRunPackage("0.2.0"), "@baldaworks/acprun@0.2.0"; got != want {
+		t.Fatalf("acpRunPackage(\"0.2.0\") = %q, want %q", got, want)
+	}
+	if got, want := acpRunPackage("@0.3.0"), "@baldaworks/acprun@0.3.0"; got != want {
+		t.Fatalf("acpRunPackage(\"@0.3.0\") = %q, want %q", got, want)
+	}
+}
+
 func TestConfigValidate(t *testing.T) {
 	t.Parallel()
 
@@ -159,6 +173,47 @@ func TestConfigValidate(t *testing.T) {
 					Model: "gemini-2.5-flash",
 				},
 			},
+		},
+		{
+			name: "valid_registry_acp",
+			cfg: Config{
+				Type: AgentTypeRegistryACP,
+				RegistryACP: &ACPConfig{
+					RegistryID: "amp-acp",
+				},
+			},
+		},
+		{
+			name: "valid_agy_acp",
+			cfg: Config{
+				Type: AgentTypeAgyACP,
+				AgyACP: &ACPConfig{
+					Model: "default",
+				},
+			},
+		},
+		{
+			name: "valid_antigravity_acp",
+			cfg: Config{
+				Type: AgentTypeAntigravityACP,
+				AntigravityACP: &ACPConfig{
+					Model: "default",
+				},
+			},
+		},
+		{
+			name: "registry_acp_missing_block",
+			cfg: Config{
+				Type: AgentTypeRegistryACP,
+			},
+			wantErr: "exactly one type-specific block must be set",
+		},
+		{
+			name: "agy_acp_missing_block",
+			cfg: Config{
+				Type: AgentTypeAgyACP,
+			},
+			wantErr: "exactly one type-specific block must be set",
 		},
 	}
 
@@ -334,6 +389,104 @@ func TestNormalizeConfig(t *testing.T) {
 				Mode:            "plan",
 				ReasoningEffort: "high",
 			},
+		},
+		{
+			name: "agy_alias",
+			cfg: Config{
+				Type: AgentTypeAgyACP,
+				AgyACP: &ACPConfig{
+					Model:           "gemini-2.5-pro",
+					ReasoningEffort: "high",
+					Mode:            "plan",
+					ExtraArgs:       []string{"--trace"},
+				},
+			},
+			exec: execPath,
+			want: ResolvedConfig{
+				Type:            AgentTypeGenericACP,
+				Command:         []string{"npx", "-y", "@baldaworks/acprun@0.1.6", "run", "antigravity-acp", "--trace"},
+				Model:           "gemini-2.5-pro",
+				Mode:            "plan",
+				ReasoningEffort: "high",
+			},
+		},
+		{
+			name: "antigravity_alias",
+			cfg: Config{
+				Type: AgentTypeAntigravityACP,
+				AntigravityACP: &ACPConfig{
+					Model:     "gemini-2.5-flash",
+					Mode:      "code",
+					ExtraArgs: []string{"--trace"},
+				},
+			},
+			exec: execPath,
+			want: ResolvedConfig{
+				Type:    AgentTypeGenericACP,
+				Command: []string{"npx", "-y", "@baldaworks/acprun@0.1.6", "run", "antigravity-acp", "--trace"},
+				Model:   "gemini-2.5-flash",
+				Mode:    "code",
+			},
+		},
+		{
+			name: "agy_bridge_version",
+			cfg: Config{
+				Type: AgentTypeAgyACP,
+				AgyACP: &ACPConfig{
+					BridgeVersion: "0.2.0",
+					ExtraArgs:     []string{"--trace"},
+				},
+			},
+			exec: execPath,
+			want: ResolvedConfig{
+				Type:    AgentTypeGenericACP,
+				Command: []string{"npx", "-y", "@baldaworks/acprun@0.2.0", "run", "antigravity-acp", "--trace"},
+			},
+		},
+		{
+			name: "registry_acp",
+			cfg: Config{
+				Type: AgentTypeRegistryACP,
+				RegistryACP: &ACPConfig{
+					RegistryID:      "amp-acp",
+					Model:           "default",
+					ReasoningEffort: "medium",
+					Mode:            "code",
+					ExtraArgs:       []string{"--verbose"},
+				},
+			},
+			exec: execPath,
+			want: ResolvedConfig{
+				Type:            AgentTypeGenericACP,
+				Command:         []string{"npx", "-y", "@baldaworks/acprun@0.1.6", "run", "amp-acp", "--verbose"},
+				Model:           "default",
+				Mode:            "code",
+				ReasoningEffort: "medium",
+			},
+		},
+		{
+			name: "registry_acp_bridge_version",
+			cfg: Config{
+				Type: AgentTypeRegistryACP,
+				RegistryACP: &ACPConfig{
+					RegistryID:    "amp-acp",
+					BridgeVersion: "0.2.0",
+				},
+			},
+			exec: execPath,
+			want: ResolvedConfig{
+				Type:    AgentTypeGenericACP,
+				Command: []string{"npx", "-y", "@baldaworks/acprun@0.2.0", "run", "amp-acp"},
+			},
+		},
+		{
+			name: "registry_acp_missing_id_and_cmd",
+			cfg: Config{
+				Type:        AgentTypeRegistryACP,
+				RegistryACP: &ACPConfig{},
+			},
+			exec:    execPath,
+			wantErr: "registry_id or cmd is required for type registry_acp",
 		},
 		{
 			name: "generic_with_template",

@@ -36,6 +36,19 @@ func TestFactory_CreateAgent(t *testing.T) {
 				Cmd: helperACPCommand(t),
 			},
 		},
+		"test-agy": {
+			Type: agentconfig.AgentTypeAgyACP,
+			AgyACP: &agentconfig.ACPConfig{
+				Cmd: helperACPCommand(t),
+			},
+		},
+		"test-registry": {
+			Type: agentconfig.AgentTypeRegistryACP,
+			RegistryACP: &agentconfig.ACPConfig{
+				RegistryID: "amp-acp",
+				Cmd:        helperACPCommand(t),
+			},
+		},
 	}
 	f := New(agents, mcpregistry.New(nil))
 
@@ -44,6 +57,30 @@ func TestFactory_CreateAgent(t *testing.T) {
 			AgentID:          "test-acp",
 			Name:             "TestACP",
 			Description:      "Test Description",
+			WorkingDirectory: t.TempDir(),
+		}
+		ag, err := f.Build(context.Background(), req)
+		assert.NoError(t, err)
+		assert.NotNil(t, ag)
+	})
+
+	t.Run("Create Agy ACP Agent", func(t *testing.T) {
+		req := BuildRequest{
+			AgentID:          "test-agy",
+			Name:             "TestAgy",
+			Description:      "Test Agy Description",
+			WorkingDirectory: t.TempDir(),
+		}
+		ag, err := f.Build(context.Background(), req)
+		assert.NoError(t, err)
+		assert.NotNil(t, ag)
+	})
+
+	t.Run("Create Registry ACP Agent", func(t *testing.T) {
+		req := BuildRequest{
+			AgentID:          "test-registry",
+			Name:             "TestRegistry",
+			Description:      "Test Registry Description",
 			WorkingDirectory: t.TempDir(),
 		}
 		ag, err := f.Build(context.Background(), req)
