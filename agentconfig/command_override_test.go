@@ -10,14 +10,14 @@ func TestNormalizeConfig_ACPAliasCommandOverride(t *testing.T) {
 		name string
 		cfg  Config
 	}{
-		{"codex", Config{Type: AgentTypeCodexACP, CodexACP: &ACPConfig{Cmd: []string{"custom-codex"}, ExtraArgs: []string{"--stdio"}, Model: "model", ReasoningEffort: "high", Mode: "review"}}},
-		{"claude", Config{Type: AgentTypeClaudeCodeACP, ClaudeCodeACP: &ACPConfig{Cmd: []string{"custom-claude"}, ExtraArgs: []string{"--stdio"}, Model: "model", ReasoningEffort: "high", Mode: "review"}}},
-		{"opencode", Config{Type: AgentTypeOpenCodeACP, OpenCodeACP: &ACPConfig{Cmd: []string{"custom-opencode"}, ExtraArgs: []string{"--stdio"}, Model: "model", ReasoningEffort: "high", Mode: "review"}}},
-		{"copilot", Config{Type: AgentTypeCopilotACP, CopilotACP: &ACPConfig{Cmd: []string{"custom-copilot"}, ExtraArgs: []string{"--stdio"}, Model: "model", ReasoningEffort: "high", Mode: "review"}}},
-		{"grok", Config{Type: AgentTypeGrokACP, GrokACP: &ACPConfig{Cmd: []string{"custom-grok"}, ExtraArgs: []string{"--stdio"}, Model: "model", ReasoningEffort: "high", Mode: "review"}}},
-		{"agy", Config{Type: AgentTypeAgyACP, AgyACP: &ACPConfig{Cmd: []string{"custom-agy"}, ExtraArgs: []string{"--stdio"}, Model: "model", ReasoningEffort: "high", Mode: "review"}}},
-		{"antigravity", Config{Type: AgentTypeAntigravityACP, AntigravityACP: &ACPConfig{Cmd: []string{"custom-antigravity"}, ExtraArgs: []string{"--stdio"}, Model: "model", ReasoningEffort: "high", Mode: "review"}}},
-		{"registry", Config{Type: AgentTypeRegistryACP, RegistryACP: &ACPConfig{Cmd: []string{"custom-registry"}, ExtraArgs: []string{"--stdio"}, Model: "model", ReasoningEffort: "high", Mode: "review"}}},
+		{"codex", Config{Type: AgentTypeCodexACP, CodexACP: testACPConfig("custom-codex")}},
+		{"claude", Config{Type: AgentTypeClaudeCodeACP, ClaudeCodeACP: testACPConfig("custom-claude")}},
+		{"opencode", Config{Type: AgentTypeOpenCodeACP, OpenCodeACP: testACPConfig("custom-opencode")}},
+		{"copilot", Config{Type: AgentTypeCopilotACP, CopilotACP: testACPConfig("custom-copilot")}},
+		{"grok", Config{Type: AgentTypeGrokACP, GrokACP: testACPConfig("custom-grok")}},
+		{"agy", Config{Type: AgentTypeAgyACP, AgyACP: testACPConfig("custom-agy")}},
+		{"antigravity", Config{Type: AgentTypeAntigravityACP, AntigravityACP: testACPConfig("custom-antigravity")}},
+		{"registry", Config{Type: AgentTypeRegistryACP, RegistryACP: testACPConfig("custom-registry")}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -34,6 +34,21 @@ func TestNormalizeConfig_ACPAliasCommandOverride(t *testing.T) {
 			if got.Model != "model" || got.ReasoningEffort != "high" || got.Mode != "review" {
 				t.Fatalf("metadata = %#v", got)
 			}
+			if got.ModelConfigID != "provider_model" || got.ReasoningEffortConfigID != "thought_level" {
+				t.Fatalf("config option IDs = %#v", got)
+			}
 		})
+	}
+}
+
+func testACPConfig(command string) *ACPConfig {
+	return &ACPConfig{
+		Cmd:                     []string{command},
+		ExtraArgs:               []string{"--stdio"},
+		Model:                   "model",
+		ModelConfigID:           "provider_model",
+		ReasoningEffort:         "high",
+		ReasoningEffortConfigID: "thought_level",
+		Mode:                    "review",
 	}
 }

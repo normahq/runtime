@@ -695,9 +695,11 @@ func TestConfigYAMLTags(t *testing.T) {
 		MCPServers:         []string{"workspace"},
 		SystemInstructions: "system",
 		CodexACP: &ACPConfig{
-			ExtraArgs:       []string{"--trace"},
-			Model:           "gpt-5-codex",
-			ReasoningEffort: "high",
+			ExtraArgs:               []string{"--trace"},
+			Model:                   "gpt-5-codex",
+			ModelConfigID:           "model",
+			ReasoningEffort:         "high",
+			ReasoningEffortConfigID: "reasoning_effort",
 		},
 	})
 	if err != nil {
@@ -708,6 +710,8 @@ func TestConfigYAMLTags(t *testing.T) {
 	for _, want := range []string{
 		"mcp_servers:",
 		"reasoning_effort:",
+		"model_config_id:",
+		"reasoning_effort_config_id:",
 		"system_instructions:",
 		"codex_acp:",
 		"extra_args:",

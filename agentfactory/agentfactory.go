@@ -572,7 +572,7 @@ var acpConstructor = func(ctx context.Context, cfg agentconfig.ResolvedConfig, r
 		Context:           ctx,
 		Name:              effectiveName(req),
 		Description:       effectiveDescription(req, cfg),
-		SessionConfig:     acpSessionConfigValues(cfg.Model, cfg.Mode),
+		SessionConfig:     acpSessionConfigValues(cfg.Model, cfg.ModelConfigID, reasoningEffort, cfg.ReasoningEffortConfigID, cfg.Mode),
 		Instruction:       effectiveInstruction(req, cfg),
 		GlobalInstruction: effectiveGlobalInstruction(req),
 		Command:           append([]string(nil), cfg.Command...),
@@ -586,15 +586,25 @@ var acpConstructor = func(ctx context.Context, cfg agentconfig.ResolvedConfig, r
 	})
 }
 
-func acpSessionConfigValues(modelName, mode string) []acpagent.SessionConfigValue {
-	values := make([]acpagent.SessionConfigValue, 0, 2)
+func acpSessionConfigValues(modelName, modelConfigID, reasoningEffort, reasoningEffortConfigID, mode string) []acpagent.SessionConfigValue {
+	values := make([]acpagent.SessionConfigValue, 0, 3)
 	if modelName = strings.TrimSpace(modelName); modelName != "" {
-		values = append(values, acpagent.SessionConfigValue{ID: "model", Value: modelName})
+		values = append(values, acpagent.SelectSessionConfigValue(defaultString(modelConfigID, "model"), modelName))
+	}
+	if reasoningEffort = strings.TrimSpace(reasoningEffort); reasoningEffort != "" {
+		values = append(values, acpagent.SelectSessionConfigValue(defaultString(reasoningEffortConfigID, "reasoning_effort"), reasoningEffort))
 	}
 	if mode = strings.TrimSpace(mode); mode != "" {
-		values = append(values, acpagent.SessionConfigValue{ID: "mode", Value: mode})
+		values = append(values, acpagent.SelectSessionConfigValue("mode", mode))
 	}
 	return values
+}
+
+func defaultString(value, fallback string) string {
+	if value = strings.TrimSpace(value); value != "" {
+		return value
+	}
+	return fallback
 }
 
 var poolConstructor = func(ctx context.Context, cfg agentconfig.ResolvedConfig, req BuildRequest, f *Factory, _ map[string]agentconfig.MCPServerConfig) (agent.Agent, error) {
