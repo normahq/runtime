@@ -210,8 +210,10 @@ func TestFactoryBuild_PropagatesACPReasoningEffort(t *testing.T) {
 	})
 
 	var capturedReasoningEffort string
+	var capturedSessionConfig []acpagent.SessionConfigValue
 	newACPAgent = func(cfg acpagent.Config) (agent.Agent, error) {
 		capturedReasoningEffort = cfg.ReasoningEffort
+		capturedSessionConfig = cfg.SessionConfig
 		return nil, nil
 	}
 
@@ -231,6 +233,9 @@ func TestFactoryBuild_PropagatesACPReasoningEffort(t *testing.T) {
 		t.Fatalf("Build() error = %v", err)
 	}
 	assert.Equal(t, "medium", capturedReasoningEffort)
+	assert.Equal(t, []acpagent.SessionConfigValue{
+		acpagent.SelectSessionConfigValue("reasoning_effort", "medium"),
+	}, capturedSessionConfig)
 }
 
 func TestFactoryBuild_BuildRequestReasoningEffortOverridesProvider(t *testing.T) {
@@ -297,6 +302,42 @@ func TestFactoryBuild_AllowsReasoningEffortOverrideForGenericACP(t *testing.T) {
 		t.Fatalf("Build() error = %v", err)
 	}
 	assert.Equal(t, "high", capturedReasoningEffort)
+}
+
+func TestFactoryBuild_UsesExactACPConfigOptionIDsInOrder(t *testing.T) {
+	origNewACPAgent := newACPAgent
+	t.Cleanup(func() {
+		newACPAgent = origNewACPAgent
+	})
+
+	var captured []acpagent.SessionConfigValue
+	newACPAgent = func(cfg acpagent.Config) (agent.Agent, error) {
+		captured = cfg.SessionConfig
+		return nil, nil
+	}
+	f := New(map[string]agentconfig.Config{
+		"custom": {
+			Type: agentconfig.AgentTypeGenericACP,
+			GenericACP: &agentconfig.ACPConfig{
+				Cmd:                     helperACPCommand(t),
+				Model:                   "current-model",
+				ModelConfigID:           "provider_model",
+				ReasoningEffort:         "medium",
+				ReasoningEffortConfigID: "thought_level",
+				Mode:                    "code",
+			},
+		},
+	}, mcpregistry.New(nil))
+
+	_, err := f.Build(context.Background(), BuildRequest{AgentID: "custom", WorkingDirectory: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	assert.Equal(t, []acpagent.SessionConfigValue{
+		acpagent.SelectSessionConfigValue("provider_model", "current-model"),
+		acpagent.SelectSessionConfigValue("thought_level", "medium"),
+		acpagent.SelectSessionConfigValue("mode", "code"),
+	}, captured)
 }
 
 func TestACPConstructor_PassesConfiguredSlogLogger(t *testing.T) {

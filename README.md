@@ -112,10 +112,13 @@ It runs the agent via `@baldaworks/acprun` (defaulting to pinned `0.1.6`, custom
 `agy_acp` (and compatibility alias `antigravity_acp`) runs the Google Antigravity CLI ACP
 agent (`antigravity-acp`) via `@baldaworks/acprun`.
 
-`reasoning_effort` is a generic ACP config field and may be set on any ACP-backed
-provider config (`generic_acp`, `codex_acp`, `opencode_acp`, `copilot_acp`,
-`claude_code_acp`, `claude_acp`, `grok_acp`, `registry_acp`, `agy_acp`, `antigravity_acp`). Runtime forwards it to the ACP agent config and leaves
-backend-specific handling to the concrete ACP implementation.
+`model` and `reasoning_effort` are explicit ACP session settings. Runtime applies
+them after `session/new` or `session/resume`, so configured values replace
+conflicting persisted values for the same option IDs. `model_config_id` defaults
+to `model`, and `reasoning_effort_config_id` defaults to `reasoning_effort`.
+Set the exact IDs advertised by a custom ACP server when they differ, for
+example `reasoning_effort_config_id: thought_level`. Omitted settings remain
+session-controlled. This behavior is shared by every ACP-backed provider config.
 
 `claude_acp` is a compatibility alias for `claude_code_acp`. Both use the same
 `claude_code_acp` configuration block.
