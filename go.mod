@@ -1,13 +1,13 @@
 module github.com/normahq/runtime/v2
 
-go 1.26.5
+go 1.26.6
 
 require (
 	github.com/coder/acp-go-sdk v0.13.5
 	github.com/go-playground/validator/v10 v10.30.2
 	github.com/go-viper/mapstructure/v2 v2.5.0
 	github.com/modelcontextprotocol/go-sdk v1.5.0
-	github.com/normahq/go-adk-acpagent/v2 v2.2.5-0.20260905202642-011e66c97060
+	github.com/normahq/go-adk-acpagent/v2 v2.2.5
 	github.com/rs/zerolog v1.35.1
 	github.com/spf13/viper v1.21.0
 	github.com/stretchr/testify v1.11.1
