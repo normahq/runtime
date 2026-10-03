@@ -20,7 +20,7 @@ import (
 
 const (
 	defaultOpenAIBaseURL = "https://api.openai.com/v1"
-	openAITimeout        = 30 * time.Second
+	defaultOpenAITimeout = 30 * time.Second
 
 	// openAIRoleAssistant is the OpenAI role for model-authored messages.
 	openAIRoleAssistant = "assistant"
@@ -44,9 +44,18 @@ func openAIBaseURL() string {
 // OpenAIModel adapts the OpenAI chat completions API to the ADK model
 // interface.
 type OpenAIModel struct {
-	name   string
-	apiKey string
-	client *http.Client
+	name            string
+	apiKey          string
+	client          *http.Client
+	reasoningEffort string
+}
+
+// OpenAIModelOptions controls optional OpenAI-compatible request behavior.
+type OpenAIModelOptions struct {
+	// Timeout defaults to 30 seconds when zero.
+	Timeout time.Duration
+	// ReasoningEffort is omitted when empty. Only "none" is supported.
+	ReasoningEffort string
 }
 
 // openAIToolDefinition is one entry of the request "tools" array.
@@ -74,6 +83,7 @@ type openAIToolCall struct {
 type openAIChatRequest struct {
 	Model       string                 `json:"model"`
 	Messages    []openAIMessage        `json:"messages"`
+	Thinking    *openAIThinking        `json:"thinking,omitempty"`
 	Temperature float64                `json:"temperature,omitempty"`
 	TopP        float64                `json:"top_p,omitempty"`
 	MaxTokens   int32                  `json:"max_tokens,omitempty"`
@@ -83,6 +93,10 @@ type openAIChatRequest struct {
 	// toolAliases translates OpenAI-safe function names back to the runtime
 	// names expected by ADK. It is request-local and never serialized.
 	toolAliases map[string]string
+}
+
+type openAIThinking struct {
+	Type string `json:"type"`
 }
 
 // openAIMessage is one entry of the request "messages" array.
@@ -108,6 +122,19 @@ type openAIChatResponse struct {
 
 // NewOpenAIModel creates an ADK-compatible model backed by the OpenAI API.
 func NewOpenAIModel(apiKey, modelName string) (*OpenAIModel, error) {
+	return NewOpenAIModelWithOptions(apiKey, modelName, OpenAIModelOptions{})
+}
+
+// NewOpenAIModelWithTimeout creates a model with a configured HTTP request timeout.
+func NewOpenAIModelWithTimeout(apiKey, modelName string, timeout time.Duration) (*OpenAIModel, error) {
+	if timeout <= 0 {
+		return nil, fmt.Errorf("openai timeout must be positive")
+	}
+	return NewOpenAIModelWithOptions(apiKey, modelName, OpenAIModelOptions{Timeout: timeout})
+}
+
+// NewOpenAIModelWithOptions creates a model with explicit request options.
+func NewOpenAIModelWithOptions(apiKey, modelName string, opts OpenAIModelOptions) (*OpenAIModel, error) {
 	if strings.TrimSpace(apiKey) == "" {
 		return nil, fmt.Errorf("api_key is required for openai provider")
 	}
@@ -116,10 +143,23 @@ func NewOpenAIModel(apiKey, modelName string) (*OpenAIModel, error) {
 		return nil, fmt.Errorf("model is required for openai provider")
 	}
 
+	timeout := opts.Timeout
+	if timeout == 0 {
+		timeout = defaultOpenAITimeout
+	}
+	if timeout < 0 {
+		return nil, fmt.Errorf("openai timeout must be positive")
+	}
+	switch opts.ReasoningEffort {
+	case "", "none":
+	default:
+		return nil, fmt.Errorf("openai reasoning_effort currently supports only none")
+	}
 	return &OpenAIModel{
-		name:   modelName,
-		apiKey: apiKey,
-		client: &http.Client{Timeout: openAITimeout},
+		name:            modelName,
+		apiKey:          apiKey,
+		client:          &http.Client{Timeout: timeout},
+		reasoningEffort: opts.ReasoningEffort,
 	}, nil
 }
 
@@ -140,6 +180,9 @@ func (m *OpenAIModel) generate(ctx context.Context, req *model.LLMRequest) (*mod
 	payload, err := buildChatRequest(req, m.name)
 	if err != nil {
 		return nil, err
+	}
+	if m.reasoningEffort == "none" {
+		payload.Thinking = &openAIThinking{Type: "disabled"}
 	}
 
 	respBody, err := m.doChatRequest(ctx, payload)

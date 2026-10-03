@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	acp "github.com/coder/acp-go-sdk"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -701,9 +702,13 @@ func TestFactoryBuild_OpenAIProvider(t *testing.T) {
 
 	var capturedAPIKey string
 	var capturedModelName string
-	newOpenAIModel = func(apiKey, modelName string) (model.LLM, error) {
+	var capturedTimeout time.Duration
+	var capturedReasoningEffort string
+	newOpenAIModel = func(apiKey, modelName string, timeout time.Duration, reasoningEffort string) (model.LLM, error) {
 		capturedAPIKey = apiKey
 		capturedModelName = modelName
+		capturedTimeout = timeout
+		capturedReasoningEffort = reasoningEffort
 		return fakeHostedModel{name: "remote-openai"}, nil
 	}
 
@@ -717,8 +722,10 @@ func TestFactoryBuild_OpenAIProvider(t *testing.T) {
 		"openai": {
 			Type: agentconfig.AgentTypeOpenAI,
 			OpenAI: &agentconfig.LocalAPIConfig{
-				APIKey: "openai-test-key",
-				Model:  "gpt-5",
+				APIKey:          "openai-test-key",
+				Model:           "gpt-5",
+				Timeout:         "180s",
+				ReasoningEffort: "none",
 			},
 			SystemInstructions: "from-config",
 			MCPServers:         []string{"docs"},
@@ -749,6 +756,9 @@ func TestFactoryBuild_OpenAIProvider(t *testing.T) {
 	}
 	if capturedModelName != "gpt-5" {
 		t.Fatalf("openai model name = %q, want gpt-5", capturedModelName)
+	}
+	if capturedTimeout != 180*time.Second || capturedReasoningEffort != "none" {
+		t.Fatalf("openai options = %v, %q", capturedTimeout, capturedReasoningEffort)
 	}
 	if capturedCfg.Name != "shell-openai" {
 		t.Fatalf("hosted agent name = %q, want shell-openai", capturedCfg.Name)
@@ -790,7 +800,7 @@ func TestFactoryBuildKeepsPreferredDedupEndpoint(t *testing.T) {
 		newOpenAIModel = originalModel
 		newHostedAgent = originalHostedAgent
 	})
-	newOpenAIModel = func(string, string) (model.LLM, error) {
+	newOpenAIModel = func(string, string, time.Duration, string) (model.LLM, error) {
 		return fakeHostedModel{name: "test-openai"}, nil
 	}
 	newHostedAgent = func(hostedagent.Config) (agent.Agent, error) {

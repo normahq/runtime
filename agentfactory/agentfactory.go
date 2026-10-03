@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -542,8 +543,10 @@ func newHostedAgentDefault(cfg hostedagent.Config) (agent.Agent, error) {
 	return hostedagent.New(cfg)
 }
 
-func newOpenAIModelDefault(apiKey, modelName string) (model.LLM, error) {
-	return hostedagent.NewOpenAIModel(apiKey, modelName)
+func newOpenAIModelDefault(apiKey, modelName string, timeout time.Duration, reasoningEffort string) (model.LLM, error) {
+	return hostedagent.NewOpenAIModelWithOptions(apiKey, modelName, hostedagent.OpenAIModelOptions{
+		Timeout: timeout, ReasoningEffort: reasoningEffort,
+	})
 }
 
 func newAIStudioModelDefault(ctx context.Context, apiKey, modelName string) (model.LLM, error) {
@@ -685,7 +688,7 @@ var openAIConstructor = func(ctx context.Context, cfg agentconfig.ResolvedConfig
 	if cfg.Type != agentconfig.AgentTypeOpenAI {
 		return nil, fmt.Errorf("unknown openai agent type %q", cfg.Type)
 	}
-	llmModel, err := newOpenAIModel(cfg.APIKey, cfg.Model)
+	llmModel, err := newOpenAIModel(cfg.APIKey, cfg.Model, cfg.Timeout, cfg.ReasoningEffort)
 	if err != nil {
 		return nil, err
 	}
