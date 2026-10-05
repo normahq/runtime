@@ -126,6 +126,18 @@ func main() {
 }
 ```
 
+Factory-built hosted agents with configured MCP servers implement `io.Closer`.
+Close them at the owning runtime/session boundary to release their lazily opened
+MCP connections. Closing is idempotent, prevents reconnection, cancels pending
+connection work, and reports cleanup errors or a bounded pending-work timeout.
+MCP subprocess termination uses the SDK's bounded stdin/signal/kill sequence;
+HTTP session-deletion requests have a five-second deadline without imposing a
+timeout on ordinary tool calls or SSE streams. Caller-supplied `BuildRequest.Toolsets`
+remain caller-owned. Hosted live/node capabilities and public config stay intact.
+Pool shutdown closes all members it created, including failed members retained
+across retries, and fences pending creation. A constructor that ignores cancellation
+returns a shutdown timeout; its late result remains registered for cleanup.
+
 For `codex_acp`, `bridge_version` accepts an npm version or dist-tag for
 the canonical [`codex-acp`](https://github.com/baldaworks/codex-acp) package;
 empty defaults to the tested `1.10.1` release. The configuration field keeps
