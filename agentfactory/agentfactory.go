@@ -169,10 +169,14 @@ func (f *Factory) GetAgentConfig(agentID string) (agentconfig.Config, error) {
 	return cfg, nil
 }
 
-// ValidateAgent checks if an agent with agentID can be built.
+// ValidateAgent checks the provider schema and required construction parameters.
+// It does not start providers, acquire MCP connections, or issue model requests.
 func (f *Factory) ValidateAgent(agentID string) error {
 	cfg, err := f.GetAgentConfig(agentID)
 	if err != nil {
+		return err
+	}
+	if err := cfg.Validate(); err != nil {
 		return err
 	}
 	resolvedCfg, err := agentconfig.NormalizeConfig(cfg, f.executablePath)
@@ -182,7 +186,16 @@ func (f *Factory) ValidateAgent(agentID string) error {
 	if _, ok := constructors[resolvedCfg.Type]; !ok {
 		return fmt.Errorf("agent type %q is not supported", resolvedCfg.Type)
 	}
-	return nil
+	switch resolvedCfg.Type {
+	case agentconfig.AgentTypeOpenAI:
+		return hostedagent.ValidateOpenAIModelOptions(resolvedCfg.APIKey, resolvedCfg.Model, hostedagent.OpenAIModelOptions{
+			Timeout: resolvedCfg.Timeout, ReasoningEffort: resolvedCfg.ReasoningEffort,
+		})
+	case agentconfig.AgentTypeAIStudio:
+		return hostedagent.ValidateAIStudioModel(resolvedCfg.Model)
+	default:
+		return nil
+	}
 }
 
 // Build creates an agent.Agent instance from request.

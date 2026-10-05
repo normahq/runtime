@@ -126,6 +126,8 @@ func main() {
 }
 ```
 
+`Factory.ValidateAgent` checks the selected provider schema and required hosted model parameters without starting providers or acquiring MCP connections. Hosted model constructors reuse these parameter checks; AI Studio credentials retain the client SDK environment defaults.
+
 Factory-built hosted agents with configured MCP servers implement `io.Closer`.
 Close them at the owning runtime/session boundary to release their lazily opened
 MCP connections. Closing is idempotent, prevents reconnection, cancels pending
